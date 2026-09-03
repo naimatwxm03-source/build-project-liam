@@ -57,6 +57,27 @@ Telegram Trigger
 - **SMTP** — Yandex 360 app password.
 - Webhook URL to register with Telegram: `https://n8n.n-enterprise.ru/webhook/<id>`
 
+## 4a. Cloudflare — inbound webhook path (environment fact, learned the hard way)
+
+The VPS sits behind Cloudflare. Telegram delivers messages by POSTing **into** n8n, so that inbound path is the fragile part — and it fails silently, which is what makes it expensive.
+
+**Register the webhook against the Cloudflare-proxied domain**, never the VPS IP or a grey-cloud subdomain:
+`https://n8n.n-enterprise.ru/webhook/<id>`
+
+**Three settings that must be right:**
+
+1. **WAF / Bot Fight Mode will block Telegram.** Telegram's POSTs look like bot traffic because they are. Add a Cloudflare WAF rule to skip Bot Fight Mode and any managed challenge for the path `/webhook/*`. Symptom when wrong: Telegram receives 403, stops retrying, and **nothing appears in n8n at all** — no execution, no error, no log line. You will think the bot is broken when the request never arrived.
+2. **SSL/TLS mode: Full (strict).** Telegram refuses invalid or self-signed certificates and returns no diagnostic you can act on.
+3. **Port 443 only.** Cloudflare proxies a fixed port set; anything else is not proxied and Telegram cannot reach it.
+
+**Verify registration before debugging anything else:**
+```
+curl -s "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"
+```
+Check `url` is the Cloudflare domain, `pending_update_count` is 0, and `last_error_message` is absent. **A non-empty `last_error_message` is the answer** — it names the failure directly and saves an hour of guessing.
+
+Same constraint applies to Build 2's chat widget webhook and Build 3's Voximplant callback. Solve it once here.
+
 ## 5. Data
 **In:** `{ message_id, from.id, from.username, text?, photo[]?, date }`
 
