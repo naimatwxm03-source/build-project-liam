@@ -41,7 +41,7 @@ Ask only what you cannot infer. If four or more are answerable from his message,
 | **Where it runs** | Timeweb VPS / client infra / laptop — decides the model (see §4) |
 | **What already exists** | Their CRM, their spreadsheet, their inbox. Automating around an existing system beats replacing it |
 
-Default when he says "just go": VPS, GigaChat, RU client, <500 runs/day, Telegram+VK channel — and say so up front.
+Default when he says "just go": VPS, Qwen 3 on Yandex AI Studio, RU client, <500 runs/day, Telegram+VK channel — and say so up front.
 
 ---
 
@@ -65,11 +65,16 @@ Environment facts, not preferences. Full substitution table: `references/ru-stac
 
 | Runs on | Model |
 |---|---|
-| Timeweb VPS (`n8n.n-enterprise.ru`) | **GigaChat**, YandexGPT as fallback. Anthropic/OpenAI/Google direct calls fail from that box. |
-| Vision / document OCR | **Yandex Vision OCR** for extraction → GigaChat for structuring. Two cheap calls beat one uncertain multimodal call. |
-| Embeddings | GigaChat Embeddings, or self-hosted `multilingual-e5` on the VPS |
+| Timeweb VPS (`n8n.n-enterprise.ru`) | **Qwen 3 via Yandex AI Studio**, OpenAI-compatible endpoint `https://llm.api.cloud.yandex.net/v1`. YandexGPT then GigaChat as fallbacks. Anthropic/OpenAI/Google direct calls fail from that box. |
+| Reasoning-heavy steps | DeepSeek on Yandex AI Studio — same endpoint, different model string |
+| Vision / document OCR | **Yandex Vision OCR** for extraction → Qwen for structuring. Two cheap calls beat one uncertain multimodal call. |
+| Embeddings | Yandex AI Studio embeddings, or self-hosted `multilingual-e5` on the VPS |
 | Naimat's laptop (Claude Code) | Claude. Reasoning-heavy work lives here, never in a workflow node. |
 | Client infra outside RU | Claude / OpenAI — only if they genuinely host outside RU |
+
+**One account rule:** LLM, Vision OCR, SpeechKit and Geocoder all come from the same Yandex Cloud account. One credential, one bill, one auth pattern. Never propose a design that adds a second model vendor without a stated reason.
+
+**Cost rule:** Yandex marks Chinese models up ~30x vs calling them directly — that markup is what buys 152-ФЗ compliance and a rouble invoice, so it is the correct choice for client work. Never route a client through a payment intermediary to save it. Reduce cost by reducing tokens (retrieval without generation, caching, small model for routing, deterministic Switch nodes), and always put the cloud account in the client's name.
 
 **Channels:** never design a RU client's *end users* onto a channel gated by payment or a foreign account. Telegram is **not blocked** and is the highest-usage RU messenger — it's a valid primary channel; the risk is future regulatory pressure, not present availability. Mitigate architecturally, not by avoiding it: **build the channel adapter pattern** (§5) so Telegram → VK is a config change. MAX needs a verified Russian legal entity — flag as blocked until ИП/ООО exists. Avito is where RU SMB lead flow actually is.
 
@@ -159,7 +164,7 @@ Trigger → <step> → <step> → <outcome>
 
 - **Decide.** "You could do A or B" is a failure. Pick, and give the one reason.
 - **Cut scope out loud.** If the "What I'm NOT building" section is empty, you didn't do the job.
-- **Name real services.** GigaChat, Yandex Geocoder, Bitrix24, Qdrant, Voximplant. Not "an LLM", not "a CRM".
+- **Name real services.** Qwen on Yandex AI Studio, Yandex Vision OCR, Yandex Geocoder, Bitrix24, Qdrant, Voximplant. Not "an LLM", not "a CRM".
 - **Check payability before falling in love.** §3.5 is the highest-yield question in this skill.
 - **Say what you don't know.** `[ASSUMED]` and `[VERIFY]` tags beat a confident guess. Never invent a client's data schema or an API's pricing.
 - **Refuse fake scope.** If it needs a human decision with no rule, say so and place the human. Don't pretend a prompt fixes it.

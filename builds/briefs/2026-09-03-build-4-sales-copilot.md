@@ -1,5 +1,5 @@
 # Brief: Копилот менеджера по продажам (Sales Rep Copilot)
-**For:** Client-facing, capstone · **Runs on:** Timeweb VPS (n8n + React frontend + SearXNG + Firecrawl, all Docker/Nginx) · **Model:** GigaChat · **Est. build:** 24–30 h
+**For:** Client-facing, capstone · **Runs on:** Timeweb VPS (n8n + React frontend + SearXNG + Firecrawl, all Docker/Nginx) · **Model:** Qwen 3 (Yandex AI Studio) · **Est. build:** 24–30 h
 **Ports:** Liam Build 4 · **Portability:** ~50% — Lovable, SerpAPI, Apify and LinkedIn are all out. **The forced substitutions make this a better portfolio piece than the original.**
 
 ## 0. Why the substitutions are an upgrade
@@ -12,7 +12,7 @@ Liam has you vibe-code the frontend on Lovable and rent three research APIs. You
 | Firecrawl cloud | **Firecrawl self-hosted** (Docker) | Same API surface, no card, no per-page cost |
 | Apify LinkedIn scraper | **Rusprofile/Kontur by ИНН + HH.ru API** | LinkedIn is blocked in RU and isn't the RU B2B graph anyway. ИНН → выручка, учредители, суды, численность is *more* useful to a Russian salesperson than a job title. |
 | Airtable | **Bitrix24** | The CRM the client already has |
-| Gemini | **GigaChat** | Runs from the box |
+| Gemini | **Qwen 3 (Yandex AI Studio)** | Runs from the box |
 
 This is the build to put at the top of the portfolio: a full-stack, self-hosted, RU-native agent app with no foreign dependency anywhere on the critical path. That sentence is the sales pitch.
 
@@ -25,7 +25,7 @@ A salesperson opens a chat app before a call. They ask it to research the compan
 Auth: a shared bearer token in the header for v1 `[Phase 2: per-user JWT]`. This endpoint reads and writes a client's CRM — **do not deploy it unauthenticated**, even for a demo.
 
 ## 3. Architecture
-Pattern: **frontend + backend**, agent with tools. Two research tools are **workflow-as-tool** to keep the agent's tool list at 6 rather than 9 — over ~8 tools GigaChat starts choosing wrong.
+Pattern: **frontend + backend**, agent with tools. Two research tools are **workflow-as-tool** to keep the agent's tool list at 6 rather than 9 — over ~8 tools Qwen 3 (Yandex AI Studio) starts choosing wrong.
 
 ```
 React frontend (VPS, Nginx)
@@ -33,7 +33,7 @@ React frontend (VPS, Nginx)
    ↓
 Webhook → Auth check (IF) → Normalize → Rate limit (Redis)
    ↓
-Sales Copilot Agent (GigaChat)
+Sales Copilot Agent (Qwen 3 (Yandex AI Studio))
    ├ memory: Postgres Chat Memory, key = copilot:{session_id}
    ├ tool: Research Company   → SUB-A
    ├ tool: Research Web       → SUB-B
@@ -60,7 +60,7 @@ SUB-B Research Web:      { query }
 | 1 | Webhook | Frontend entry | POST, respond via node | Unauthenticated = CRM write access to the internet |
 | 2 | IF | Bearer check | compare to env var | — |
 | 3 | Redis | Rate limit | 60 req / 10 min / session | — |
-| 4 | AI Agent | Reason + choose tools | GigaChat, prompt §Appendix | >8 tools → wrong tool choice. Keep to 6. |
+| 4 | AI Agent | Reason + choose tools | Qwen 3 (Yandex AI Studio), prompt §Appendix | >8 tools → wrong tool choice. Keep to 6. |
 | 5 | Postgres Chat Memory | Per-chat context | key `copilot:{session_id}`, window 12 | Reps share context if unkeyed |
 | 6 | Execute Workflow (tool) | Research Company | inputs model-defined | Model passes a company name where ИНН is needed — sub-flow must handle both |
 | 7 | Execute Workflow (tool) | Research Web | — | Scrape returns 40k tokens → **must** trim in the sub-flow, not the agent |
@@ -76,7 +76,7 @@ SUB-B Research Web:      { query }
 **Frontend** (`builds/04-sales-copilot/frontend/`): React + Vite + Tailwind. Chat list in a sidebar, one `session_id` (UUID) per chat persisted in `localStorage`, markdown rendering, per-message tool-call chips with ✓/✗, a thinking state. Built with Claude Code, `/design` first if you want the layout settled visually before coding.
 
 ## 4. Credentials & environment
-- **GigaChat** — reuse the OAuth+cache sub-workflow.
+- **Qwen 3 (Yandex AI Studio)** — reuse the Yandex AI Studio credential.
 - **Rusprofile / Kontur.Focus** — `[VERIFY API access model and pricing — this may be the one paid RU dependency. If it's not affordable, fall back to open ЕГРЮЛ data from ФНС.]`
 - **HH.ru API** — public endpoints, no key for basic search `[VERIFY rate limits]`.
 - **SearXNG** — Docker on the VPS, JSON output enabled in `settings.yml` (off by default).
@@ -101,7 +101,7 @@ SUB-B Research Web:      { query }
   - CRM update: allowed directly, but every write goes to `tool_audit`, and stage transitions are validated against an allowlist in the Workflow Configuration node. An agent must not be able to set a deal to "Закрыт успешно".
 - Research sub-flow fails → agent reports what it couldn't find and continues. A copilot that dies because one API is down is worse than no copilot.
 - Firecrawl OOM → catch, return partial results, alert.
-- Retries: SearXNG 1, Firecrawl 2, Rusprofile 2, Bitrix24 3, GigaChat 3. **SMTP: 0 retries** — a retry on an ambiguous SMTP response sends the email twice.
+- Retries: SearXNG 1, Firecrawl 2, Rusprofile 2, Bitrix24 3, Qwen 3 retries. **SMTP: 0 retries** — a retry on an ambiguous SMTP response sends the email twice.
 - Rate limits at 10 reps × 30 messages/day: Bitrix24 fine, HH.ru `[VERIFY]`, Rusprofile likely the binding one — hence the cache.
 
 ## 7. Test plan
@@ -119,7 +119,7 @@ SUB-B Research Web:      { query }
 
 ## 8. Cost at stated volume
 10 reps × 30 messages/day = 300 agent turns/day.
-- GigaChat: 300 × ~3 500 tokens (research context is heavy) ≈ 32M tokens/mo → **dominant cost.** The 7-day research cache is what keeps this affordable — build it in v1, not as an optimization later.
+- Qwen: 300 × ~3 500 tokens (research context is heavy) ≈ 32M tokens/mo → **dominant cost.** The 7-day research cache is what keeps this affordable — build it in v1, not as an optimization later.
 - Rusprofile/Kontur: `[VERIFY]` — with cache, ~40 unique lookups/day
 - SearXNG, Firecrawl: self-hosted, VPS resources only
 - **VPS impact is real here:** n8n + Postgres + Redis + Qdrant + SearXNG + Firecrawl + frontend. **Check RAM headroom before deploying.** Firecrawl is the one that will surprise you. If the box is tight, move Firecrawl to the second VPS.
@@ -142,7 +142,7 @@ SUB-B Research Web:      { query }
 ## 11. Build order
 1. **`/security-review` the auth design before writing the webhook.** This endpoint writes to a client's CRM.
 2. Webhook + bearer check + hardcoded reply. Test 401 from outside the VPS.
-3. Agent with GigaChat, no tools. Postgres memory. Session isolation test.
+3. Agent with Qwen 3 (Yandex AI Studio), no tools. Postgres memory. Session isolation test.
 4. SearXNG in Docker, JSON output on, query it with curl. Green standalone.
 5. Firecrawl in Docker **with a memory limit**. Scrape one page via curl.
 6. SUB-B Research Web end-to-end. **Check the output token count** — this is where the cost blows up.

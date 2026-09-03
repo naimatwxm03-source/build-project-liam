@@ -96,7 +96,7 @@ The one thing you lose: Liam's GPT has web search for API research. Claude Code 
 
 | # | Build | Portable to RU? | Worth building? | Re-grounded as |
 |---|---|---|---|---|
-| 1 | Telegram receipt tracker | **Yes, ~90%** — swap model + storage | **Yes, first** | Учёт расходов бот — Telegram, GigaChat vision / Yandex Vision OCR, Postgres |
+| 1 | Telegram receipt tracker | **Yes, ~90%** — swap model + storage | **Yes, first** | Учёт расходов бот — Telegram, Qwen 3 (Yandex AI Studio) vision / Yandex Vision OCR, Postgres |
 | 2 | Website lead-gen chat + Solar API | **No, ~40%** — Solar API is dead in RU | **Yes, but re-scoped** | Калькулятор ремонта/окон — Yandex Geocoder + own pricing matrix, Qdrant KB, Bitrix24 |
 | 3 | Retell voice qualifier | **No, ~30%** — Retell + RU telephony licensing | **Yes, with a de-risked path** | Voximplant inbound, or Telegram voice-message qualifier (no phone number needed) |
 | 4 | Lovable sales copilot | **Partly, ~50%** — Lovable/SerpAPI/Apify/LinkedIn all out | **Yes — best portfolio piece** | Own React frontend on your VPS, self-hosted SearXNG + Firecrawl, Rusprofile/HH.ru, Bitrix24 |

@@ -8,14 +8,27 @@ Every service Liam's four builds depend on, why it fails from a Russian IP / Rus
 
 ## 1. Models
 
+**Primary: Qwen 3 on Yandex AI Studio**, called through its **OpenAI-compatible endpoint**. This is what the Russian market has actually moved to — Qwen is the #1 foreign model on the platform (21.2% of token consumption), DeepSeek second (13.5%), and Chinese-model usage in Russia grew ~5x in a year.
+
 | Liam uses | Fails because | NXAI substitute | Notes |
 |---|---|---|---|
-| Gemini 2.5 Flash (text) | Google AI Studio geo-blocks RU; card declined | **GigaChat** (Sber) | No native n8n node. HTTP Request pattern: OAuth token → chat completion, token cached in Set/Redis with TTL. Budget a token-refresh node + the cert-chain workaround. Proven in your VK bot. |
-| Gemini 2.5 Flash (vision) | same | **GigaChat multimodal** `[VERIFY current vision quality on RU receipts]`, fallback **Yandex Vision OCR** | For receipts specifically, Yandex Vision OCR is likely more accurate than a general multimodal model — it's purpose-built for documents and returns structured text blocks. Recommended path: Yandex Vision OCR for text extraction → GigaChat for field structuring. Two cheap calls beat one expensive uncertain one. |
-| Gemini embeddings | same | **GigaChat Embeddings**, or self-host `multilingual-e5-large` / `ruBERT` in a container on the VPS | Self-hosting removes a per-call cost and a network dependency. Worth it once you have >1 KB-backed build. |
-| — | — | **YandexGPT 5** | Fallback model. Keep credentials configured so a GigaChat outage is a one-field switch in the Workflow Configuration node. |
+| Gemini 2.5 Flash (text) | Google AI Studio geo-blocks RU; card declined | **Qwen 3 via Yandex AI Studio** | Base URL `https://llm.api.cloud.yandex.net/v1`. Model string `gpt://<folder_id>/qwen3-235b/latest`. Auth: `Authorization: Api-Key <key>`. **OpenAI-compatible — use n8n's OpenAI Chat Model node, no custom HTTP node needed.** |
+| Gemini 2.5 Flash (vision) | same | **Yandex Vision OCR** → Qwen for structuring | Vision OCR is purpose-built for documents and beats a general multimodal model on receipts. Two cheap calls beat one uncertain one. |
+| Gemini embeddings | same | **Yandex AI Studio embeddings** (`text-search-doc` / `text-search-query`), or self-hosted `multilingual-e5-large` | Same account, same key. Self-host once you have >1 KB-backed build. |
+| — | — | **DeepSeek on Yandex AI Studio** | Swap the model string only. Cheaper and stronger on analysis than GigaChat; use where reasoning matters. |
+| — | — | **YandexGPT 5** — first fallback | Same endpoint, different model string. A one-field switch. |
+| — | — | **GigaChat** — second fallback only | Demoted. Separate OAuth, a Russian-root cert-chain problem in Docker, among the most expensive RU models, weaker at JSON and tool-calling. Not worth it as a primary. |
 
-**Rule:** anything running on `n8n.n-enterprise.ru` calls GigaChat or YandexGPT. Anthropic/OpenAI/Google direct calls from that box fail. Claude belongs in VS Code, not in a workflow node.
+**Why this replaced GigaChat as the primary — three concrete wins:**
+1. **One Yandex Cloud account** covers LLM + Vision OCR + SpeechKit + Geocoder. One credential set, one bill, one auth pattern instead of four.
+2. **OpenAI-compatible** means n8n's built-in nodes work. No hand-built OAuth flow, no token-cache sub-workflow, and **no TLS cert-chain fight in Docker** — which was the single biggest blocker in the original plan.
+3. **Better model.** Qwen and DeepSeek are stronger at reliable JSON and tool-calling than GigaChat, which is the failure mode that breaks agent builds.
+
+**Two things to know:**
+- **n8n gotcha:** the OpenAI node **v2** with a custom base URL can pass the credential test and then 404 at runtime; **v1.8 and the AI Agent's OpenAI Chat Model node work.** Test this first. Backup: the `n8n-nodes-yc` community node.
+- **Markup:** Yandex charges roughly 30x what DeepSeek charges directly (~$3/$5 vs ~$0.09/$0.18 per 1M tokens). You are paying for the data staying inside the Russian regulatory perimeter and a rouble invoice — which is exactly what 152-ФЗ requires when handling a client's customer data. Do not go direct: Russian cards don't work there, and payment intermediaries are too fragile to hand to a client. Manage cost by **using fewer tokens** (retrieval without generation, caching, small model for routing, deterministic Switch nodes), and put the cloud account **in the client's name** so consumption is their bill, not yours.
+
+**Rule:** anything running on `n8n.n-enterprise.ru` calls Yandex AI Studio. Anthropic/OpenAI/Google direct calls from that box fail. Claude belongs in VS Code, never in a workflow node.
 
 ---
 

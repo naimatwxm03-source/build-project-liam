@@ -7,12 +7,19 @@ Load when the architecture touches a service whose RU availability is uncertain.
 ## Models
 | Need | Use | Notes |
 |---|---|---|
-| Text LLM on VPS | GigaChat | No native n8n node — HTTP Request: OAuth token → completion. Cache token in Set/Redis with TTL. Cert-chain workaround needed. |
-| Fallback LLM | YandexGPT 5 | Keep credentials live so an outage is a one-field switch |
-| Document / receipt OCR | Yandex Vision OCR → GigaChat for structuring | More accurate on documents than general multimodal |
-| Image understanding (general) | GigaChat multimodal `[VERIFY quality]` | |
-| Embeddings | GigaChat Embeddings, or self-hosted `multilingual-e5-large` | Self-host once >1 KB-backed build exists |
+| Text LLM on VPS | **Qwen 3 via Yandex AI Studio** | Base URL `https://llm.api.cloud.yandex.net/v1`, model `gpt://<folder_id>/qwen3-235b/latest`, auth `Authorization: Api-Key <key>`. OpenAI-compatible → use n8n's OpenAI Chat Model node. No OAuth, no cert-chain fight. |
+| Reasoning-heavy | DeepSeek on Yandex AI Studio | Same endpoint, different model string |
+| Fallback LLM | YandexGPT 5, then GigaChat | One-field switch in Workflow Configuration |
+| Document / receipt OCR | Yandex Vision OCR → Qwen for structuring | Same cloud account |
+| Speech to text | Yandex SpeechKit | Same cloud account |
+| Embeddings | Yandex AI Studio embeddings, or self-hosted `multilingual-e5-large` | Same key |
 | **Never on the VPS** | Anthropic, OpenAI, Google Gemini | Direct calls fail. Claude belongs in VS Code. |
+
+**Why Yandex AI Studio over GigaChat:** one account for LLM + OCR + STT + Geocoder; OpenAI-compatible so native n8n nodes work; better JSON/tool-calling than GigaChat. GigaChat is a fallback only — separate OAuth, cert-chain problems in Docker, expensive.
+
+**Cost lever:** Yandex marks Chinese models up ~30x vs direct, and that markup buys 152-ФЗ compliance. Never go direct (RU cards fail, intermediaries are fragile). Cut cost with fewer tokens — retrieval without generation, Redis caching, a small model for routing, deterministic Switch nodes — and put the cloud account in the client's name so consumption is their bill.
+
+**n8n gotcha:** OpenAI node v2 + custom base URL can pass the credential test then 404 at runtime; v1.8 and the AI Agent's OpenAI Chat Model node work. Backup: `n8n-nodes-yc` community node.
 
 ## Channels
 | Channel | Status | Use for |

@@ -1,5 +1,5 @@
 # Brief: Бот учёта расходов (Expense Tracking Bot)
-**For:** Internal / demo-able to clients · **Runs on:** Timeweb VPS (n8n.n-enterprise.ru) · **Model:** Yandex Vision OCR + GigaChat · **Est. build:** 6–8 h
+**For:** Internal / demo-able to clients · **Runs on:** Timeweb VPS (n8n.n-enterprise.ru) · **Model:** Yandex Vision OCR + Qwen 3 · **Est. build:** 6–8 h
 **Ports:** Liam Build 1 · **Portability:** ~90% — pattern intact, vendors swapped
 
 ## 1. What it does
@@ -20,7 +20,7 @@ Telegram Trigger
   → IF has photo?
       ├ yes → Get File (Telegram) → Yandex Vision OCR (HTTP) → Set: receipt_text
       └ no  → Set: receipt_text = ""
-  → Expense Agent (AI Agent, GigaChat)
+  → Expense Agent (AI Agent, Qwen 3 (Yandex AI Studio))
         ├ tool: Log Expense       (Postgres insert)
         ├ tool: Query Expenses    (Postgres select)
         ├ tool: Alert Finance     (Send Email / SMTP)
@@ -36,8 +36,8 @@ Telegram Trigger
 | 4 | IF | Photo present? | `$json.file_id` not empty | — |
 | 5 | Telegram: Get File | Download the photo | binary out | 400 — `file_id` expired (>1h old forward) |
 | 6 | HTTP Request | Yandex Vision OCR | POST, base64 image, `IAM-Token` header | 401 IAM token expired (12h TTL); 413 image >20MB |
-| 7 | HTTP Request | GigaChat OAuth token | cached in Redis, TTL 25 min | Cert-chain error — see §4 |
-| 8 | AI Agent | Decides: log / query / alert | GigaChat via custom LLM node, system prompt §Appendix | Model returns prose instead of a tool call |
+| 7 | *(node removed)* | Yandex AI Studio needs no OAuth/token-cache node — the API key goes straight in the credential | — | — |
+| 8 | AI Agent | Decides: log / query / alert | Qwen 3 via OpenAI Chat Model node (Yandex AI Studio base URL), system prompt §Appendix | Model returns prose instead of a tool call |
 | 9 | Postgres (tool) | Insert expense row | table `expenses` | Unique violation on `message_id` — intended, treat as already-logged |
 | 10 | Postgres (tool) | Read for Q&A | parameterized `SELECT` only | Agent writes an unbounded query → cap `LIMIT 200` in the tool |
 | 11 | Send Email (tool) | Finance alert over threshold | Yandex 360 SMTP | 535 auth — app password not set |
@@ -47,7 +47,11 @@ Telegram Trigger
 ## 4. Credentials & environment
 - **Telegram Bot API** — token from @BotFather. Naimat owns.
 - **Yandex Cloud** — service account + IAM token for Vision OCR. **IAM tokens expire in 12h** — either refresh via `Schedule Trigger` into Redis, or use an API key if the endpoint accepts one `[VERIFY which auth mode Vision OCR takes]`.
-- **GigaChat** — client ID + secret, scope `GIGACHAT_API_PERS` (or `_CORP`). **Cert chain:** the Russian trusted root must be in the n8n container's CA store, or set `NODE_TLS_REJECT_UNAUTHORIZED` scoped to that host only — never globally.
+- **Yandex AI Studio (Qwen 3)** — same Yandex Cloud account and service-account **API key** as Vision OCR. In n8n create an **OpenAI credential** with:
+  - API key: your Yandex Cloud service-account key
+  - Base URL: `https://llm.api.cloud.yandex.net/v1`
+  - Model string: `gpt://<folder_id>/qwen3-235b/latest`
+  **No OAuth flow, no token cache, no cert-chain workaround.** If the OpenAI node v2 404s at runtime despite the credential test passing, use v1.8 or the AI Agent's OpenAI Chat Model node.
 - **Postgres** — separate database `nxai_expenses`, not n8n's own DB. Own user, no superuser.
 - **Redis** — already on the VPS. DB index dedicated to this workflow.
 - **SMTP** — Yandex 360 app password.
@@ -75,11 +79,11 @@ Retention: indefinite (accounting). Receipt images are **not** stored — only `
 
 ## 6. Error handling
 - **Error Trigger workflow** → Telegram DM to Naimat with workflow name, node, error, `execution_id`.
-- **Retries:** Vision OCR and GigaChat — 3 attempts, 2s/4s/8s. Postgres — 1 retry. SMTP — 2.
+- **Retries:** Vision OCR and Qwen 3 (Yandex AI Studio) — 3 attempts, 2s/4s/8s. Postgres — 1 retry. SMTP — 2.
 - **OCR fails entirely** → do not drop the message. Reply "не смог прочитать чек, отправьте сумму текстом" and let the agent take the text path. A failed read must never silently lose an expense.
 - **Confidence < 0.8** → `needs_review = true`, still logged, reply says it needs checking. Logging a flagged row beats losing it.
 - **Mid-batch failure:** n/a, one message per execution.
-- **Rate limits at stated volume** — Telegram 30 msg/s (irrelevant), Vision OCR `[VERIFY RPS quota]`, GigaChat per-plan. At <200 receipts/day nothing here binds.
+- **Rate limits at stated volume** — Telegram 30 msg/s (irrelevant), Vision OCR `[VERIFY RPS quota]`, Qwen 3 (Yandex AI Studio) per-plan. At <200 receipts/day nothing here binds.
 
 ## 7. Test plan
 1. **Happy path:** photo of a 1 240 ₽ taxi receipt → row in `expenses` with vendor, date, total 1240.00, category "транспорт", `confidence ≥ 0.8`, `over_threshold=false`; Telegram reply confirms the parsed fields.
@@ -93,7 +97,7 @@ Retention: indefinite (accounting). Receipt images are **not** stored — only `
 ## 8. Cost at stated volume
 Assume 200 receipts/day + 50 Q&A/day.
 - Yandex Vision OCR: 200/day ≈ 6 000 pages/mo → `[VERIFY ₽/1000 pages]`, order of magnitude ~1 000–2 000 ₽/mo
-- GigaChat: 250 runs/day × ~1 200 tokens ≈ 9M tokens/mo → `[VERIFY GigaChat package pricing]`
+- Qwen: 250 runs/day × ~1 200 tokens ≈ 9M tokens/mo → `[VERIFY Qwen 3 (Yandex AI Studio) package pricing]`
 - Postgres/Redis: on existing VPS, ~0 marginal
 - SMTP: included in Yandex 360
 - **VPS headroom:** negligible. This build does not move the needle on the box.
@@ -105,14 +109,14 @@ Assume 200 receipts/day + 50 Q&A/day.
 
 ## 10. Open risks
 - `[VERIFY]` Yandex Vision OCR accuracy on crumpled thermal-paper RU receipts. **Test this before quoting anyone.** The entire value proposition rests on it. Budget an hour with 20 real receipts from your own wallet.
-- `[VERIFY]` GigaChat auth scope — `_PERS` may have limits that bite on a client deployment; `_CORP` needs a legal entity.
+- `[VERIFY]` Qwen 3 (Yandex AI Studio) auth scope — `_PERS` may have limits that bite on a client deployment; `_CORP` needs a legal entity.
 - `[ASSUMED]` RUB default currency, 50 000 ₽ threshold. Client-configurable in the Workflow Configuration node.
 - The ИП/ООО question blocks `_CORP` scope and MAX, same as everywhere else.
 
 ## 11. Build order
 1. Telegram Trigger → Set → Telegram reply. Echo bot. **Green before anything else.**
 2. Add Postgres. Log a hardcoded row. Confirm it lands.
-3. Add the GigaChat HTTP pattern *standalone* in a scratch workflow — OAuth, token cache, one completion. This is the piece that will fight you. Get it green in isolation.
+3. Add the OpenAI Chat Model node pointed at Yandex AI Studio in a scratch workflow — one completion with Qwen. Confirm the base URL and `gpt://<folder_id>/qwen3-235b/latest` model string work before anything else.
 4. Add Yandex Vision OCR standalone. Feed it one real receipt. Look at the raw response before you write any parsing.
 5. Wire OCR → agent → Postgres insert. Full happy path.
 6. Add the Q&A read tool.

@@ -1,5 +1,5 @@
 # Brief: Голосовая квалификация лида (Speed-to-Lead Voice Qualifier)
-**For:** Client-facing, same client as Build 2 · **Runs on:** Timeweb VPS · **Model:** Yandex SpeechKit STT + GigaChat · **Est. build:** Phase A 8–10 h · Phase B +10–14 h
+**For:** Client-facing, same client as Build 2 · **Runs on:** Timeweb VPS · **Model:** Yandex SpeechKit STT + Qwen 3 · **Est. build:** Phase A 8–10 h · Phase B +10–14 h
 **Ports:** Liam Build 3 · **Portability:** ~30% — Retell is unpayable and RU telephony needs a legal entity. **Two-phase path below sidesteps the blocker.**
 
 ## 0. The blocker, and the way around it
@@ -42,7 +42,7 @@ Voximplant hook ──┼→ Normalize Ingest (Set) { phone, transcript_source, 
                   │     ├ no  → Postgres: unmatched_calls + Telegram alert
                   │     └ yes → Bitrix24 update stage = "Контакт установлен"
                   │              ↓
-                  │           GigaChat: analyze transcript
+                  │           Qwen 3 (Yandex AI Studio): analyze transcript
                   │            + Structured Output Parser
                   │              ↓
                   │           Switch on qualified
@@ -63,7 +63,7 @@ Voximplant hook ──┼→ Normalize Ingest (Set) { phone, transcript_source, 
 | 8 | HTTP Request | Bitrix24 `crm.deal.list` | filter on phone | 401 stale webhook; empty result is normal, not an error |
 | 9 | IF | Lead found? | — | — |
 | 10 | HTTP Request | Bitrix24 `crm.deal.update` | stage → Контакт установлен | Wrong `stage_id` — they're pipeline-specific, read them from the client's portal, never assume |
-| 11 | Basic LLM Chain | Analyze transcript | GigaChat + Structured Output Parser, schema §5 | Returns prose not JSON — see §6 |
+| 11 | Basic LLM Chain | Analyze transcript | Qwen 3 (Yandex AI Studio) + Structured Output Parser, schema §5 | Returns prose not JSON — see §6 |
 | 12 | Switch | Route on `qualified` | — | Null `qualified` → route to manual review, not to Отказ. **Never auto-reject on a parse failure.** |
 | 13/14 | HTTP Request | Update deal | qualified / disqualified + reason + transcript | Field length limit on the comment |
 | 15 | Postgres | `unmatched_calls` | phone, transcript, ts | — |
@@ -72,7 +72,7 @@ Voximplant hook ──┼→ Normalize Ingest (Set) { phone, transcript_source, 
 ## 4. Credentials & environment
 - **Telegram Bot API** — reuse Build 1's bot or a client-specific one.
 - **Yandex Cloud SpeechKit** — service account, IAM token (12h TTL, refresh on a schedule into Redis) or API key `[VERIFY which STT accepts]`. Model: `general:rc` with `ru-RU`.
-- **GigaChat** — reuse the OAuth+cache sub-workflow.
+- **Qwen 3 (Yandex AI Studio)** — reuse the Yandex AI Studio credential.
 - **Bitrix24 inbound webhook** — scopes `crm`. **The client owns it.**
 - **Voximplant (Phase B)** — account, application, scenario, purchased RU number. **Number purchase requires ИП/ООО + document verification.** Budget 1–2 weeks for that, not 1–2 hours.
 - **Postgres** — `unmatched_calls`, `qualification_log`.
@@ -108,7 +108,7 @@ Every boolean gets its own field, not just `qualified` — when the client dispu
 - **Structured Output Parser fails** → retry once with a stricter prompt; on second failure route to **manual review**, never to Отказ. An automated rejection based on a parse error is the single most damaging failure mode in this build — it loses the client a real customer and they will find out.
 - **Confidence < 0.7** → stage "Требует проверки" regardless of the verdict.
 - **No phone match** → log + alert. A rising unmatched rate means the widget isn't storing phones correctly; that's a Build 2 bug surfacing here.
-- Retries: SpeechKit 2, GigaChat 3, Bitrix24 3.
+- Retries: SpeechKit 2, Qwen 3 retries, Bitrix24 3.
 - Rate limits: Bitrix24 REST ~2 req/s. At 50 calls/day, fine.
 
 ## 7. Test plan
@@ -124,7 +124,7 @@ Every boolean gets its own field, not just `qualified` — when the client dispu
 ## 8. Cost at stated volume
 50 qualifications/day.
 - SpeechKit STT: 50 × ~90s = 75 min/day ≈ 2 250 min/mo → `[VERIFY ₽/min]`, likely the dominant cost
-- GigaChat: 50 × ~2 500 tokens (transcripts are long) ≈ 3.8M tokens/mo
+- Qwen: 50 × ~2 500 tokens (transcripts are long) ≈ 3.8M tokens/mo
 - Bitrix24: free tier sufficient
 - Voximplant (Phase B): number rental + per-minute inbound `[VERIFY]`
 - VPS: negligible
@@ -148,7 +148,7 @@ Every boolean gets its own field, not just `qualified` — when the client dispu
 2. SpeechKit STT standalone, one real voice message, read the raw response.
 3. Async STT path for >30s audio. Do this now, not when a client hits it.
 4. Bitrix24 `crm.deal.list` standalone. **Solve phone normalization here**, in isolation, before it's buried in a flow.
-5. GigaChat + Structured Output Parser on a hardcoded transcript. Get clean JSON reliably before wiring anything.
+5. Qwen 3 (Yandex AI Studio) + Structured Output Parser on a hardcoded transcript. Get clean JSON reliably before wiring anything.
 6. Wire the full path with the IF/Switch branches.
 7. Deal updates, both branches, correct `stage_id`s from the client's portal.
 8. Dedup, Error Trigger, low-confidence routing, unmatched logging.

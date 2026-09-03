@@ -1,6 +1,6 @@
 # build-project-liam — Liam's 4 n8n Builds, Rebuilt RU-Native
 
-Four agent builds from Liam's course, re-architected to run entirely on a Russian stack: **GigaChat / Yandex Cloud / Bitrix24 / Qdrant / Voximplant**, self-hosted n8n 2.36.8 on a Timeweb VPS. No foreign dependency on any critical path, nothing that needs a card that doesn't work.
+Four agent builds from Liam's course, re-architected to run entirely on a Russian stack: **Qwen 3 (Yandex AI Studio) / Yandex Cloud / Bitrix24 / Qdrant / Voximplant**, self-hosted n8n 2.36.8 on a Timeweb VPS. No foreign dependency on any critical path, nothing that needs a card that doesn't work.
 
 **Start here:** [`docs/00-course-review.md`](docs/00-course-review.md) — what's real in the course, what breaks from Russia, and what's worth your time.
 
@@ -20,9 +20,9 @@ The patterns Liam teaches are genuine and worth learning. The vendors are not po
 
 | # | Build | Brief | RU stack | Portability |
 |---|---|---|---|---|
-| 1 | Бот учёта расходов | [brief](builds/briefs/2026-09-03-build-1-expense-bot.md) | Telegram · Yandex Vision OCR · GigaChat · Postgres | ~90% |
+| 1 | Бот учёта расходов | [brief](builds/briefs/2026-09-03-build-1-expense-bot.md) | Telegram · Yandex Vision OCR · Qwen 3 (Yandex AI Studio) · Postgres | ~90% |
 | 2 | Чат-виджет со сметой | [brief](builds/briefs/2026-09-03-build-2-lead-widget.md) | Own widget · Qdrant · Yandex Geocoder · Bitrix24 | ~40% — re-scoped |
-| 3 | Голосовая квалификация | [brief](builds/briefs/2026-09-03-build-3-voice-qualifier.md) | SpeechKit STT · GigaChat · Bitrix24 · Voximplant (phase B) | ~30% — two-phase |
+| 3 | Голосовая квалификация | [brief](builds/briefs/2026-09-03-build-3-voice-qualifier.md) | SpeechKit STT · Qwen 3 (Yandex AI Studio) · Bitrix24 · Voximplant (phase B) | ~30% — two-phase |
 | 4 | Копилот менеджера | [brief](builds/briefs/2026-09-03-build-4-sales-copilot.md) | React on VPS · SearXNG · Firecrawl · Rusprofile · Bitrix24 | ~50% — upgraded |
 
 Each brief is buildable node-by-node with no second research session: architecture table, credentials, data schemas, error handling, test plan, cost math, pricing, open risks, build order.

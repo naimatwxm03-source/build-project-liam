@@ -14,7 +14,7 @@ All prices below are **estimates marked `[VERIFY]`**. Currency and API pricing m
 
 **Money is not your main obstacle.** You can build and demo all four builds for roughly **the cost of your existing VPS plus 0–3 000 ₽/month**. Most of the stack is free tiers or software you self-host.
 
-**Identity is your main obstacle.** GigaChat and Yandex Cloud both need a Russian account. See §2 — this is the one thing that can stop you on day one, and it has nothing to do with money.
+**Identity is your main obstacle.** Qwen 3 (Yandex AI Studio) and Yandex Cloud both need a Russian account. See §2 — this is the one thing that can stop you on day one, and it has nothing to do with money.
 
 ---
 
@@ -24,15 +24,15 @@ Before anything else, confirm you have these three. This takes twenty minutes an
 
 | You need | Used for | If you don't have it |
 |---|---|---|
-| **Russian phone number (+7)** | Sber ID (→ GigaChat), Yandex ID, VK, Avito | **Hard stop on GigaChat and Yandex Cloud.** Nothing in this repo runs without one of them. |
+| **Russian phone number (+7)** | Sber ID (→ Qwen 3 (Yandex AI Studio)), Yandex ID, VK, Avito | **Hard stop on Qwen 3 (Yandex AI Studio) and Yandex Cloud.** Nothing in this repo runs without one of them. |
 | **Russian card (Мир) or bank account** | Yandex Cloud paid tier, Timeweb top-up, YooKassa later | You can still use free tiers and grants. Blocks scaling, not starting. |
-| **ИП or ООО** | GigaChat `_CORP` scope, MAX bot, Voximplant phone number, invoicing clients in your own name | Blocks Build 3 Phase B and MAX. **Does not block Builds 1, 2, 4 or Build 3 Phase A.** |
+| **ИП or ООО** | Qwen 3 (Yandex AI Studio) `_CORP` scope, MAX bot, Voximplant phone number, invoicing clients in your own name | Blocks Build 3 Phase B and MAX. **Does not block Builds 1, 2, 4 or Build 3 Phase A.** |
 
 **Do this first, before you write a single node:**
-1. Register for GigaChat at developers.sber.ru → get client ID + secret → make **one** `curl` call for an OAuth token.
+1. Register for Qwen 3 (Yandex AI Studio) at developers.sber.ru → get client ID + secret → make **one** `curl` call for an OAuth token.
 2. Register Yandex Cloud → create a service account → make **one** `curl` call to Vision OCR with any photo.
 
-If both return 200, you're clear to build everything except Build 3 Phase B. If either fails on registration, stop and solve that — do not start building around a model you can't authenticate to.
+If all three return 200, you're clear to build everything except Build 3 Phase B. **Confirmed: you have a +7 number and a RU card, so only Build 3 Phase B (a real phone number, needs ИП/ООО) stays blocked.**
 
 ---
 
@@ -46,8 +46,8 @@ If both return 200, you're clear to build everything except Build 3 Phase B. If 
 | **VPS upgrade to 8GB RAM** | +~1 000–1 500 ₽/mo | Only if Build 4 (n8n + Postgres + Redis + Qdrant + SearXNG + Firecrawl) doesn't fit. **Measure first.** | before Build 4 |
 | **Domain (.ru)** | ~200–1 500 ₽/yr | Public demo URLs. A portfolio needs a real link, not `localhost`. | before Build 2 |
 | **TLS certificate** | **free** | Let's Encrypt | with the domain |
-| **GigaChat** | **free tier** — personal accounts get a token grant on signup | Every LLM call in all four builds | now |
-| **Yandex Cloud** | **free trial grant** ~60 days | Vision OCR (Build 1), SpeechKit (Build 3), Geocoder (Build 2) | now |
+| **Yandex AI Studio** (Qwen 3, DeepSeek, YandexGPT) | covered by the **free trial grant** below | Every LLM call in all four builds | now |
+| **Yandex Cloud** | **free trial grant** ~60 days | One account covers it all: AI Studio (LLM), Vision OCR (Build 1), SpeechKit (Build 3), Geocoder (Build 2) | now |
 | **Telegram bot** | **free** | Builds 1, 3 | now |
 | **Bitrix24** | **free tier**, 12 users | CRM for Builds 2, 3, 4 | before Build 2 |
 | **Postgres, Redis, Qdrant, SearXNG, Firecrawl** | **free**, self-hosted Docker | Storage, vectors, search, scraping | as needed |
@@ -71,7 +71,7 @@ That is the honest number. This is not an expensive project. It's a time-expensi
 
 ### Phase 1 — when a paying client exists
 
-Only then: GigaChat paid package, Yandex Cloud paid, ИП registration, Voximplant number, second VPS. **All of it paid for by the client's setup fee, not out of your pocket.** That's the whole point of quoting a setup fee.
+Only then: Yandex Cloud paid tier, ИП registration, Voximplant number, second VPS. **All of it paid for by the client's setup fee, not out of your pocket.** That's the whole point of quoting a setup fee.
 
 ---
 
@@ -89,22 +89,24 @@ Only then: GigaChat paid package, Yandex Cloud paid, ИП registration, Voximpla
 
 ---
 
-## 5. Where it will hurt — the six friction points
+## 5. Where it will hurt — the friction points
 
 Plan for these. They are the difference between "two weeks" and "two months."
 
+**Two of the original blockers are gone.** Switching from GigaChat to Qwen on Yandex AI Studio removed the TLS cert-chain fight in Docker and the hand-built OAuth token-cache node. That was roughly a day of pain, deleted. What remains:
+
 | # | Problem | How bad | What fixes it |
 |---|---|---|---|
-| 1 | **GigaChat TLS certificate chain** | 🔴 Hours. The #1 reason people give up. | The Russian trusted root (Минцифры) must be in the n8n container's CA store. Add it to your Dockerfile / mount it — do **not** disable TLS verification globally. Solve this in a scratch workflow before you build anything real. |
-| 2 | **No native GigaChat node in n8n** | 🟠 Half a day, once | Hand-build: HTTP Request for OAuth → cache token in Redis with TTL → HTTP Request for completion. **Build it once as a sub-workflow and reuse it in all four builds.** You already did this for the VK bot — go copy it. |
-| 3 | **GigaChat is weaker than Gemini 2.5 Flash** | 🟠 Ongoing, real | It follows instructions less reliably and returns malformed JSON more often. **This is a genuine downgrade and you should know it.** Mitigations, all already in the briefs: keep tool lists to ≤6, use Switch/IF instead of an agent wherever branches are enumerable, always use a Structured Output Parser with a retry, keep YandexGPT configured as a one-field fallback. |
-| 4 | **Yandex IAM tokens expire every 12 hours** | 🟡 One hour | A Schedule Trigger that refreshes the token into Redis. Build it early — it will bite you at 3am otherwise. |
-| 5 | **Phone number matching (Build 3)** | 🟡 An hour, deceptively | `+79161234567`, `89161234567`, `7 916 123-45-67` are the same person. Normalize both sides to E.164 before comparing. Solve it in isolation, not inside a flow. |
-| 6 | **Firecrawl memory on a small VPS** | 🟡 Build 4 only | Set a Docker memory limit before you start it. Without one it can take the box down and n8n goes with it. |
+| 1 | **n8n OpenAI node v2 + custom base URL 404s at runtime** | 🟠 Half an hour, if you know it | The credential test passes and then the call fails. **v1.8 and the AI Agent's OpenAI Chat Model node work.** Test this in the first 20 minutes with one completion before building anything. Backup: the `n8n-nodes-yc` community node. |
+| 2 | **The model string format** | 🟡 Ten minutes | Not `qwen3`. It's `gpt://<your_folder_id>/qwen3-235b/latest`. Auth header is `Authorization: Api-Key <key>`, not `Bearer`. Get one completion working with `curl` before you touch n8n. |
+| 3 | **Yandex IAM tokens expire every 12 hours** | 🟡 One hour | Applies to Vision OCR and SpeechKit. Use a **service-account API key** where the service accepts one — it doesn't expire. Only fall back to IAM + a Schedule Trigger refresh if the endpoint demands it. |
+| 4 | **Phone number matching (Build 3)** | 🟡 An hour, deceptively | `+79161234567`, `89161234567`, `7 916 123-45-67` are the same person. Normalize both sides to E.164 before comparing. Solve it in isolation, not inside a flow. |
+| 5 | **Firecrawl memory on a small VPS** | 🟡 Build 4 only | Set a Docker memory limit before you start it. Without one it can take the box down and n8n goes with it. |
+| 6 | **Token cost at client volume** | 🟠 Phase 1 problem | Yandex marks Chinese models up ~30x vs direct. Fix it by cutting tokens — retrieval without generation, Redis caching, a small model for routing, deterministic Switch nodes — not by switching to a grey provider. Put the cloud account in the client's name so consumption is their bill. |
 
 **Bonus honest point:** n8n's "Build with AI" is a cloud feature — your self-hosted 2.36.8 probably doesn't have it. So step 3 of Liam's pipeline doesn't exist for you. Claude Code writes the JSON instead, which is better (diffable, version-controlled), but imported JSON often needs `typeVersion` fixes. Paste the import error back into Claude Code and it's a two-minute fix.
 
----
+**One quality note, honestly:** Qwen 3 is close to Gemini 2.5 Flash and clearly better than GigaChat at reliable JSON and tool-calling — that was the risk that worried me most and it's now much smaller. The briefs still keep tool lists to ≤6 and prefer deterministic Switch nodes over agent reasoning, because that's good design regardless of model.
 
 ## 6. "Will it build if I paste one prompt into VS Code?"
 
@@ -158,7 +160,7 @@ builds/0N-<build>/
   workflow.json           the actual importable workflow
 ```
 
-**Every hour you spend stuck is a documentation page.** The GigaChat certificate problem cost you three hours? That's a lesson someone will pay for, because everyone hits it and nobody has written it down properly in English or in Russian.
+**Every hour you spend stuck is a documentation page.** The Qwen 3 (Yandex AI Studio) certificate problem cost you three hours? That's a lesson someone will pay for, because everyone hits it and nobody has written it down properly in English or in Russian.
 
 That is your genuine course differentiator versus Liam's: **he teaches the happy path on a stack that doesn't work here. You'd be teaching the real path on the stack that does.** There is no competing course for "n8n AI agents on a Russian stack." That gap is worth more than the four builds themselves.
 
@@ -170,7 +172,7 @@ Assume evenings and weekends, not full-time.
 
 | Week | What |
 |---|---|
-| **0** | Identity check (§2). GigaChat OAuth + TLS solved in a scratch workflow. Yandex Cloud service account working. **Nothing else. This week is infrastructure and it is not optional.** |
+| **0** | Identity check (§2). Qwen 3 (Yandex AI Studio) OAuth + TLS solved in a scratch workflow. Yandex Cloud service account working. **Nothing else. This week is infrastructure and it is not optional.** |
 | **1** | Build 1 end to end. Deploy. 10 real receipts. Demo video. README. |
 | **2–3** | Build 2. Qdrant, real price list, widget, deploy. 5 real conversations. |
 | **4** | Build 3 Phase A. Voice messages → STT → qualification → Bitrix24. |

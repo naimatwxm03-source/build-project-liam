@@ -58,7 +58,7 @@ Returns the node-by-node build document into `builds/briefs/`. If a brief needs 
 ### Stage 3 — Research the unknowns · `WebSearch` / `WebFetch`
 Every `[VERIFY]` tag in the brief is a task. Ask in the same session:
 ```
-Check the current GigaChat API pricing and whether the vision endpoint
+Check the current Qwen 3 (Yandex AI Studio) API pricing and whether the vision endpoint
 handles photographed receipts. Update builds/briefs/<file> with what you find.
 ```
 This is the one thing Liam's CTO GPT does that you must not skip — API research. Claude Code does it in the same window as the code.
@@ -66,8 +66,8 @@ This is the one thing Liam's CTO GPT does that you must not skip — API researc
 ### Stage 4 — Build
 ```
 Write the n8n workflow JSON for §3 of builds/briefs/<file>.
-Target n8n 2.36.8 self-hosted. GigaChat via HTTP Request with the
-token-cache pattern. Save to builds/02-lead-widget/workflow.json.
+Target n8n 2.36.8 self-hosted. Qwen 3 via the OpenAI Chat Model node
+pointed at Yandex AI Studio. Save to builds/02-lead-widget/workflow.json.
 ```
 Then in n8n: **Workflows → Import from File**, reconnect credentials, run node-by-node.
 
@@ -119,7 +119,7 @@ Use them deliberately. Most of these you already have; the point is knowing whic
 | Token budget tight on a long session | `/caveman` | ~75% fewer tokens, same technical accuracy. |
 
 **Skills to write next**, once these four builds are done — each is a recurring job you'll otherwise re-explain every time:
-- `gigachat-node` — the OAuth-token-cache HTTP Request pattern, emitted correctly every time
+- `yandex-ai-node` — the Yandex AI Studio credential + model-string pattern, emitted correctly every time
 - `channel-adapter` — generates the Telegram/VK/MAX/Avito normalization sub-workflow
 - `client-proposal` — brief → RU-language proposal with pricing and retainer
 - `vps-deploy` — deploy + Nginx + health check, one command
@@ -148,6 +148,9 @@ Until then everything above works fine — you import the JSON into n8n by hand.
 | `/automation-cto` not in the skill list | Session started before the file existed | Restart the Claude Code session |
 | Skill fires but ignores RU constraints | You pasted the idea without the skill | Invoke `/automation-cto` explicitly, don't just describe |
 | Generated workflow JSON won't import | Node names/versions differ from 2.36.8 | Paste the import error back — the fix is a version field |
-| GigaChat 401 mid-run | Token expired, no refresh node | The token-cache pattern isn't optional. See `ru-stack.md`. |
+| LLM call 401 | Wrong auth header | Yandex AI Studio wants `Authorization: Api-Key <key>`, not `Bearer`. |
+| LLM credential test passes but the node 404s | n8n OpenAI node v2 + custom base URL bug | Use node v1.8, or the AI Agent's OpenAI Chat Model node. |
+| Model not found | Wrong model string | It's `gpt://<folder_id>/qwen3-235b/latest`, not `qwen3`. |
+| Vision OCR / SpeechKit 401 after 12h | IAM token expired | Use a service-account **API key** instead of an IAM token where the endpoint allows it. |
 | Agent replies with another user's context | No session key on memory | Key memory by `channel + user_id`. Check this on every agent build. |
 | Webhook fires twice, record duplicated | External services retry | Dedup on message/event ID in Redis before processing |

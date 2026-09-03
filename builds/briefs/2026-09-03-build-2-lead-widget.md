@@ -1,5 +1,5 @@
 # Brief: Чат-виджет с расчётом сметы (Lead-Gen Widget with Instant Estimate)
-**For:** Client-facing (vertical: остекление балконов / натяжные потолки / ремонт) · **Runs on:** Timeweb VPS · **Model:** GigaChat + GigaChat Embeddings · **Est. build:** 14–18 h
+**For:** Client-facing (vertical: остекление балконов / натяжные потолки / ремонт) · **Runs on:** Timeweb VPS · **Model:** Qwen 3 + Yandex AI Studio embeddings · **Est. build:** 14–18 h
 **Ports:** Liam Build 2 · **Portability:** ~40% — **the Solar API has no RU equivalent and no RU coverage. This build is re-scoped, not translated.**
 
 ## 0. Why this is re-scoped
@@ -12,7 +12,7 @@ So the *learning objectives* are preserved and the *domain* is replaced:
 | Call a custom external API | **Yandex Geocoder** — address → coordinates + normalized components |
 | Turn a messy API response into a clean estimate | **Own pricing matrix** in Postgres + a Code node, driven by geocoded district + user-supplied параметры |
 | Workflow-as-tool | Same — the estimate is a sub-workflow the agent calls |
-| Knowledge base / RAG | Same — Qdrant + GigaChat Embeddings |
+| Knowledge base / RAG | Same — Qdrant + Yandex AI Studio embeddings |
 | Lead → CRM | **Bitrix24** instead of Airtable |
 | Website chat deployment | **Own widget** on your VPS instead of n8n's embed |
 
@@ -35,7 +35,7 @@ Pattern: **single agent + tools**, one of which is **workflow-as-tool**.
 
 ```
 MAIN:
-Webhook → Normalize (Set) → Rate Limit (Redis) → Lead Agent (GigaChat)
+Webhook → Normalize (Set) → Rate Limit (Redis) → Lead Agent (Qwen 3 (Yandex AI Studio))
               ├ memory: Postgres Chat Memory, key = web:{session_id}
               ├ tool: Knowledge Base   (Qdrant vector store retriever)
               ├ tool: Calc Estimate    (Execute Workflow → SUB)
@@ -55,7 +55,7 @@ Execute Workflow Trigger { address, width_m, glazing_type, floor }
 | 1 | Webhook | Receives widget message | POST, respond via node | CORS — set headers for the client's domain, not `*` |
 | 2 | Edit Fields | Normalize envelope | `channel='web'`, `session_key`, `text` | — |
 | 3 | Redis | Rate limit per session | 20 msg / 10 min | Open widget = abuse surface. **Not optional.** |
-| 4 | AI Agent | Conversation + tool choice | GigaChat, system prompt §Appendix | Asks for phone before delivering the estimate → kills conversion |
+| 4 | AI Agent | Conversation + tool choice | Qwen 3 (Yandex AI Studio), system prompt §Appendix | Asks for phone before delivering the estimate → kills conversion |
 | 5 | Postgres Chat Memory | Per-session context | key `web:{session_id}`, window 10 | Missing key = all visitors share one conversation |
 | 6 | Qdrant Vector Store (tool) | FAQ answers | collection `kb_<client>`, top-k 4 | Empty collection returns nothing; agent then invents. Guard in the prompt. |
 | 7 | Execute Workflow (tool) | Estimate sub-flow | inputs "let model define", descriptions in §Appendix | Model passes address as `null` — validate in the sub-flow, don't trust it |
@@ -69,7 +69,7 @@ Execute Workflow Trigger { address, width_m, glazing_type, floor }
 
 ## 4. Credentials & environment
 - **Yandex Geocoder API key** — Yandex Developer account. Free tier `[VERIFY daily request cap]`.
-- **GigaChat** — same OAuth+cache pattern as Build 1. Reuse the sub-workflow.
+- **Qwen 3 (Yandex AI Studio)** — same Yandex AI Studio API key as Build 1.
 - **Qdrant** — Docker on the VPS, own volume. Collection per client.
 - **Bitrix24** — inbound webhook URL from the client's portal (`crm.lead.add` + `crm.lead.list` scopes). **The client owns this account, not you.** Say so in the contract.
 - **Postgres** — `pricing_matrix`, `chat_memory` tables.
@@ -89,10 +89,10 @@ Execute Workflow Trigger { address, width_m, glazing_type, floor }
 
 ## 6. Error handling
 - Error Trigger → Telegram alert to Naimat, plus a graceful widget reply: "секунду, соединяюсь с менеджером" + the client's phone number. **A dead-end error message on a lead-gen widget costs the client a sale.**
-- Retries: Geocoder 2, GigaChat 3, Bitrix24 3 (idempotent-guarded).
+- Retries: Geocoder 2, Qwen 3 retries, Bitrix24 3 (idempotent-guarded).
 - Estimate sub-flow fails → agent still captures the lead, marks it `estimate_failed`, tells the user a manager will call with numbers. **Never lose the lead because the calculator broke.**
 - Qdrant unreachable → agent answers only what it can and offers the phone; must not hallucinate warranty terms. Bake into the prompt.
-- Rate limits at 200 conversations/day: Geocoder fine, GigaChat fine, Bitrix24 REST 2 req/s — fine.
+- Rate limits at 200 conversations/day: Geocoder fine, Qwen 3 (Yandex AI Studio) fine, Bitrix24 REST 2 req/s — fine.
 
 ## 7. Test plan
 1. **Happy path:** "сколько стоит остеклить балкон 3 метра" → agent asks address + type → estimate returns a range with breakdown → asks name+phone → lead in Bitrix24 with the estimate in the comment field.
@@ -106,7 +106,7 @@ Execute Workflow Trigger { address, width_m, glazing_type, floor }
 
 ## 8. Cost at stated volume
 200 conversations/day, ~8 turns each = 1 600 LLM calls/day.
-- GigaChat: 1 600 × ~900 tokens ≈ 43M tokens/mo → **the dominant cost.** `[VERIFY package pricing]`. If it's too high, route FAQ answers through retrieval-only (no generation) and reserve the LLM for the estimate flow — halves it.
+- Qwen: 1 600 × ~900 tokens ≈ 43M tokens/mo → **the dominant cost.** `[VERIFY package pricing]`. If it's too high, route FAQ answers through retrieval-only (no generation) and reserve the LLM for the estimate flow — halves it.
 - Embeddings: one-time on KB ingest + ~1 per query. Negligible.
 - Yandex Geocoder: ~40 estimate requests/day, free tier `[VERIFY]`
 - Qdrant + Postgres + widget: VPS resources. **Qdrant is the memory-hungry one** — budget ~1GB. Check headroom before deploying alongside n8n.
@@ -120,14 +120,14 @@ Execute Workflow Trigger { address, width_m, glazing_type, floor }
 ## 10. Open risks
 - **The pricing matrix must come from the client.** If they can't give you one, they don't have a repeatable price and this build cannot be honest. Ask for it in the pre-audit form, before quoting. This is the #1 kill risk.
 - `[VERIFY]` Yandex Geocoder free-tier daily cap at 200 conv/day.
-- `[VERIFY]` GigaChat token cost at 43M/mo — could make the unit economics fail. **Verify before signing a retainer.**
-- `[VERIFY]` GigaChat Embeddings quality on Russian technical KB text vs self-hosted `multilingual-e5-large`. If retrieval is weak, self-host — it's a container, not a rewrite.
+- `[VERIFY]` Qwen 3 (Yandex AI Studio) token cost at 43M/mo — could make the unit economics fail. **Verify before signing a retainer.**
+- `[VERIFY]` Yandex AI Studio embeddings quality on Russian technical KB text vs self-hosted `multilingual-e5-large`. If retrieval is weak, self-host — it's a container, not a rewrite.
 - 152-ФЗ compliance is the client's, but you must not build a form that collects a phone without consent. Non-negotiable.
 - `[ASSUMED]` остекление балконов as the vertical. Changing it changes only the KB and the pricing matrix — the architecture holds.
 
 ## 11. Build order
 1. Widget → Webhook → hardcoded reply → widget renders it. **Green first.** Get CORS right now, not later.
-2. Add the agent with GigaChat, no tools. Plain conversation.
+2. Add the agent with Qwen 3 (Yandex AI Studio), no tools. Plain conversation.
 3. Add Postgres chat memory. **Test session isolation immediately** — before more tools make it hard to see.
 4. Qdrant: ingest the KB doc, query it standalone, eyeball the retrieved chunks. Only then attach as a tool.
 5. Sub-flow standalone: Geocoder only, hardcoded address, look at the raw response.
