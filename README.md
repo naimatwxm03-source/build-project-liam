@@ -65,6 +65,7 @@ docs/
   ru-stack-map.md         every vendor → RU substitute, with reasoning
   02-start-here.md        step-by-step: VS Code -> Yandex Cloud -> Build 1
   01-reality-check.md     costs, what to buy, friction points, timeline
+  03-omniroute-claude-code.md  free-model fallback for Claude Code (laptop only)
   vscode-workflow.md      the 5-stage build loop + skill map
 builds/
   briefs/                 the four implementation briefs
