@@ -12,7 +12,7 @@ Every service Liam's four builds depend on, why it fails from a Russian IP / Rus
 
 | Liam uses | Fails because | NXAI substitute | Notes |
 |---|---|---|---|
-| Gemini 2.5 Flash (text) | Google AI Studio geo-blocks RU; card declined | **Qwen 3 via Yandex AI Studio** | Base URL `https://llm.api.cloud.yandex.net/v1`. Model string `gpt://<folder_id>/qwen3-235b/latest`. Auth: `Authorization: Api-Key <key>`. **OpenAI-compatible — use n8n's OpenAI Chat Model node, no custom HTTP node needed.** |
+| Gemini 2.5 Flash (text) | Google AI Studio geo-blocks RU; card declined | **Qwen 3 via Yandex AI Studio** | Base URL `https://llm.api.cloud.yandex.net/v1`. Model string `gpt://<folder_id>/qwen3-235b-a22b-fp8/latest`. Auth: `Authorization: Api-Key <key>`. **OpenAI-compatible — use n8n's OpenAI Chat Model node, no custom HTTP node needed.** |
 | Gemini 2.5 Flash (vision) | same | **Yandex Vision OCR** → Qwen for structuring | Vision OCR is purpose-built for documents and beats a general multimodal model on receipts. Two cheap calls beat one uncertain one. |
 | Gemini embeddings | same | **Yandex AI Studio embeddings** (`text-search-doc` / `text-search-query`), or self-hosted `multilingual-e5-large` | Same account, same key. Self-host once you have >1 KB-backed build. |
 | — | — | **DeepSeek on Yandex AI Studio** | Swap the model string only. Cheaper and stronger on analysis than GigaChat; use where reasoning matters. |

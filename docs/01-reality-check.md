@@ -98,7 +98,7 @@ Plan for these. They are the difference between "two weeks" and "two months."
 | # | Problem | How bad | What fixes it |
 |---|---|---|---|
 | 1 | **n8n OpenAI node v2 + custom base URL 404s at runtime** | 🟠 Half an hour, if you know it | The credential test passes and then the call fails. **v1.8 and the AI Agent's OpenAI Chat Model node work.** Test this in the first 20 minutes with one completion before building anything. Backup: the `n8n-nodes-yc` community node. |
-| 2 | **The model string format** | 🟡 Ten minutes | Not `qwen3`. It's `gpt://<your_folder_id>/qwen3-235b/latest`. Auth header is `Authorization: Api-Key <key>`, not `Bearer`. Get one completion working with `curl` before you touch n8n. |
+| 2 | **The model string format** | 🟡 Ten minutes | Not `qwen3`. It's `gpt://<your_folder_id>/qwen3-235b-a22b-fp8/latest`. Auth header is `Authorization: Api-Key <key>`, not `Bearer`. Get one completion working with `curl` before you touch n8n. |
 | 3 | **Yandex IAM tokens expire every 12 hours** | 🟡 One hour | Applies to Vision OCR and SpeechKit. Use a **service-account API key** where the service accepts one — it doesn't expire. Only fall back to IAM + a Schedule Trigger refresh if the endpoint demands it. |
 | 4 | **Phone number matching (Build 3)** | 🟡 An hour, deceptively | `+79161234567`, `89161234567`, `7 916 123-45-67` are the same person. Normalize both sides to E.164 before comparing. Solve it in isolation, not inside a flow. |
 | 5 | **Firecrawl memory on a small VPS** | 🟡 Build 4 only | Set a Docker memory limit before you start it. Without one it can take the box down and n8n goes with it. |

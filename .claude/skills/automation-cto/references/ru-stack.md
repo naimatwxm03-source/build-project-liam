@@ -7,7 +7,7 @@ Load when the architecture touches a service whose RU availability is uncertain.
 ## Models
 | Need | Use | Notes |
 |---|---|---|
-| Text LLM on VPS | **Qwen 3 via Yandex AI Studio** | Base URL `https://llm.api.cloud.yandex.net/v1`, model `gpt://<folder_id>/qwen3-235b/latest`, auth `Authorization: Api-Key <key>`. OpenAI-compatible → use n8n's OpenAI Chat Model node. No OAuth, no cert-chain fight. |
+| Text LLM on VPS | **Qwen 3 via Yandex AI Studio** | Base URL `https://llm.api.cloud.yandex.net/v1`, model `gpt://<folder_id>/qwen3-235b-a22b-fp8/latest`, auth `Authorization: Api-Key <key>`. OpenAI-compatible → use n8n's OpenAI Chat Model node. No OAuth, no cert-chain fight. |
 | Reasoning-heavy | DeepSeek on Yandex AI Studio | Same endpoint, different model string |
 | Fallback LLM | YandexGPT 5, then GigaChat | One-field switch in Workflow Configuration |
 | Document / receipt OCR | Yandex Vision OCR → Qwen for structuring | Same cloud account |

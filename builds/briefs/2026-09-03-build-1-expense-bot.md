@@ -50,7 +50,7 @@ Telegram Trigger
 - **Yandex AI Studio (Qwen 3)** — same Yandex Cloud account and service-account **API key** as Vision OCR. In n8n create an **OpenAI credential** with:
   - API key: your Yandex Cloud service-account key
   - Base URL: `https://llm.api.cloud.yandex.net/v1`
-  - Model string: `gpt://<folder_id>/qwen3-235b/latest`
+  - Model string: `gpt://<folder_id>/qwen3-235b-a22b-fp8/latest`
   **No OAuth flow, no token cache, no cert-chain workaround.** If the OpenAI node v2 404s at runtime despite the credential test passing, use v1.8 or the AI Agent's OpenAI Chat Model node.
 - **Postgres** — separate database `nxai_expenses`, not n8n's own DB. Own user, no superuser.
 - **Redis** — already on the VPS. DB index dedicated to this workflow.
@@ -116,7 +116,7 @@ Assume 200 receipts/day + 50 Q&A/day.
 ## 11. Build order
 1. Telegram Trigger → Set → Telegram reply. Echo bot. **Green before anything else.**
 2. Add Postgres. Log a hardcoded row. Confirm it lands.
-3. Add the OpenAI Chat Model node pointed at Yandex AI Studio in a scratch workflow — one completion with Qwen. Confirm the base URL and `gpt://<folder_id>/qwen3-235b/latest` model string work before anything else.
+3. Add the OpenAI Chat Model node pointed at Yandex AI Studio in a scratch workflow — one completion with Qwen. Confirm the base URL and `gpt://<folder_id>/qwen3-235b-a22b-fp8/latest` model string work before anything else.
 4. Add Yandex Vision OCR standalone. Feed it one real receipt. Look at the raw response before you write any parsing.
 5. Wire OCR → agent → Postgres insert. Full happy path.
 6. Add the Q&A read tool.

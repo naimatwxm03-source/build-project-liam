@@ -101,7 +101,7 @@ curl -s https://llm.api.cloud.yandex.net/v1/chat/completions \
   -H "Authorization: Api-Key $YANDEX_API_KEY" \
   -H "Content-Type: application/json" \
   -d "{
-    \"model\": \"gpt://$YANDEX_CLOUD_FOLDER_ID/qwen3-235b/latest\",
+    \"model\": \"gpt://$YANDEX_CLOUD_FOLDER_ID/qwen3-235b-a22b-fp8/latest\",
     \"messages\": [{\"role\": \"user\", \"content\": \"Ответь одним словом: работает?\"}]
   }" | head -40
 ```
@@ -193,7 +193,7 @@ Don't retype or summarise the error. Paste it raw.
 | `automation-cto` missing from `/` list | `/exit`, then `claude` again |
 | `npm: command not found` | Install Homebrew + Node — see Step 2 |
 | LLM call returns 401 | Header must be `Authorization: Api-Key <key>` — **not** `Bearer` |
-| "model not found" | Must be `gpt://<folder_id>/qwen3-235b/latest`, not `qwen3` |
+| "model not found" | Must be `gpt://<folder_id>/qwen3-235b-a22b-fp8/latest`, not `qwen3` |
 | n8n credential test passes but the node 404s | Known OpenAI-node-v2 bug. Use node v1.8, or the AI Agent's OpenAI Chat Model node |
 | Vision OCR 401 after working yesterday | You used an IAM token (12h expiry). Switch to a service-account **API key** |
 | Imported workflow won't load | Paste the import error into Claude Code — it's usually a `typeVersion` field |

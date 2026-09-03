@@ -64,7 +64,7 @@ Environment facts, not preferences. A brief that violates one is unbuildable. Fu
 
 **Yandex AI Studio in n8n:** OpenAI-compatible. Use n8n's **OpenAI Chat Model** node with:
 - Base URL `https://llm.api.cloud.yandex.net/v1` (no trailing path)
-- Model `gpt://<folder_id>/qwen3-235b/latest`
+- Model `gpt://<folder_id>/qwen3-235b-a22b-fp8/latest`
 - Auth `Authorization: Api-Key <service-account key>` — **not** `Bearer`
 
 No OAuth flow, no token-cache node, no cert-chain workaround. **n8n gotcha:** OpenAI node **v2** with a custom base URL can pass the credential test then 404 at runtime; **v1.8 and the AI Agent's OpenAI Chat Model node work.** Backup: `n8n-nodes-yc` community node.

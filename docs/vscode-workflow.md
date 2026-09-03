@@ -150,7 +150,7 @@ Until then everything above works fine — you import the JSON into n8n by hand.
 | Generated workflow JSON won't import | Node names/versions differ from 2.36.8 | Paste the import error back — the fix is a version field |
 | LLM call 401 | Wrong auth header | Yandex AI Studio wants `Authorization: Api-Key <key>`, not `Bearer`. |
 | LLM credential test passes but the node 404s | n8n OpenAI node v2 + custom base URL bug | Use node v1.8, or the AI Agent's OpenAI Chat Model node. |
-| Model not found | Wrong model string | It's `gpt://<folder_id>/qwen3-235b/latest`, not `qwen3`. |
+| Model not found | Wrong model string | It's `gpt://<folder_id>/qwen3-235b-a22b-fp8/latest`, not `qwen3`. |
 | Vision OCR / SpeechKit 401 after 12h | IAM token expired | Use a service-account **API key** instead of an IAM token where the endpoint allows it. |
 | Agent replies with another user's context | No session key on memory | Key memory by `channel + user_id`. Check this on every agent build. |
 | Webhook fires twice, record duplicated | External services retry | Dedup on message/event ID in Redis before processing |
