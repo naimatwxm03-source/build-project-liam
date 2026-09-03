@@ -2,7 +2,9 @@
 
 Four agent builds from Liam's course, re-architected to run entirely on a Russian stack: **Qwen 3 (Yandex AI Studio) / Yandex Cloud / Bitrix24 / Qdrant / Voximplant**, self-hosted n8n 2.36.8 on a Timeweb VPS. No foreign dependency on any critical path, nothing that needs a card that doesn't work.
 
-**Start here:** [`docs/00-course-review.md`](docs/00-course-review.md) — what's real in the course, what breaks from Russia, and what's worth your time.
+**New here? Start with [`docs/02-start-here.md`](docs/02-start-here.md)** — copy-paste path from an empty VS Code window to Build 1 running.
+
+**Why this repo exists:** [`docs/00-course-review.md`](docs/00-course-review.md) — what's real in the course, what breaks from Russia, and what's worth your time.
 
 ---
 
@@ -61,7 +63,9 @@ The agent never sees a `chat_id`. Adding or swapping a channel is one adapter, n
 docs/
   00-course-review.md     what's genuine, what breaks, per-build verdict
   ru-stack-map.md         every vendor → RU substitute, with reasoning
-  vscode-workflow.md      setup + the 5-stage build loop + skill map
+  02-start-here.md        step-by-step: VS Code -> Yandex Cloud -> Build 1
+  01-reality-check.md     costs, what to buy, friction points, timeline
+  vscode-workflow.md      the 5-stage build loop + skill map
 builds/
   briefs/                 the four implementation briefs
   decisions/              automation-cto architecture decisions
