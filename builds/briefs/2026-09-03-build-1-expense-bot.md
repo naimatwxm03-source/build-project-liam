@@ -85,6 +85,22 @@ Retention: indefinite (accounting). Receipt images are **not** stored — only `
 - **Mid-batch failure:** n/a, one message per execution.
 - **Rate limits at stated volume** — Telegram 30 msg/s (irrelevant), Vision OCR `[VERIFY RPS quota]`, Qwen 3 (Yandex AI Studio) per-plan. At <200 receipts/day nothing here binds.
 
+## 6a. OCR field normalisation — verified finding, 2026-09-03
+
+Yandex Vision OCR was tested live against real Russian thermal receipts (ООО Рафаэль, Самара, card terminal slips + Z-report). **Result: vendor, date and totals were all correctly found.** Build 1 proceeds as designed.
+
+One real artifact surfaced and must be handled in the parsing step:
+
+**Cyrillic/digit lookalikes.** On thermal paper, OCR confuses:
+- `З` (Cyrillic ZE, U+0417) ↔ `3` (digit three)
+- `О` (Cyrillic O, U+041E) ↔ `0` (digit zero)
+
+**Normalise ONLY inside fields already known to be numeric** — `total`, `tax`, `expense_date`, ИНН, card number. Never across the whole OCR string, and never in `vendor` or `notes`: `ЗАО` would silently become `3АО`, `Заря` becomes `3аря`. A corrupted vendor name is worse than an unparsed one because it looks correct.
+
+Implementation: extract the field first with a numeric-context regex, then normalise the characters inside the captured group only.
+
+**Photograph one receipt per image.** Multiple slips in a single frame come back as one undifferentiated text blob with no reliable way to split them. The Telegram bot naturally enforces this (one photo per message), but say so in the user-facing instructions.
+
 ## 7. Test plan
 1. **Happy path:** photo of a 1 240 ₽ taxi receipt → row in `expenses` with vendor, date, total 1240.00, category "транспорт", `confidence ≥ 0.8`, `over_threshold=false`; Telegram reply confirms the parsed fields.
 2. **Edge case:** blurred, angled receipt in poor light → either `needs_review=true` with partial fields, or a clean "не смог прочитать" reply. **Never** a silently wrong total. This is the case that decides whether the bot is trustworthy.
