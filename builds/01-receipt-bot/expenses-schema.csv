@@ -1,0 +1,2 @@
+message_id,channel,user_id,username,vendor,expense_date,total,currency,category,confidence,needs_review,notes
+SAMPLE-DELETE-ME,telegram,000000,sample_user,ООО Рафаэль,2026-08-25,2690.00,RUB,прочее,0.95,false,Пример строки — удалить после импорта
