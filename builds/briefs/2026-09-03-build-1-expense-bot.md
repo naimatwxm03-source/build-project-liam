@@ -78,6 +78,31 @@ Check `url` is the Cloudflare domain, `pending_update_count` is 0, and `last_err
 
 Same constraint applies to Build 2's chat widget webhook and Build 3's Voximplant callback. Solve it once here.
 
+## 4a-1. THE BLOCKER: the VPS cannot reach api.telegram.org — use the Worker proxy
+
+**This is the single most important environment fact in Build 1**, and it presents as a symptom that points nowhere near the cause.
+
+**Symptom:** clicking Publish in n8n returns `Request failed with status code 504`. Executing the workflow also 504s. `getWebhookInfo` shows `url: ""` — no webhook was ever registered.
+
+**Cause:** Publish makes n8n call `api.telegram.org/setWebhook` **outbound**. That call hangs from the Timeweb VPS. n8n never responds, Cloudflare gives up waiting, and the browser is handed a 504. The webhook registration never happens, so no inbound traffic exists to debug.
+
+**This is outbound, not inbound.** Cloudflare WAF rules, SSL mode and the §4a notes are about Telegram reaching *in*. They are correct and still apply, but they cannot fix this — here n8n cannot get *out*.
+
+**Fix:** route every Telegram API call through a Cloudflare Worker. Worker code: `builds/01-receipt-bot/cloudflare-worker-telegram-proxy.js`.
+
+Deployed Worker: `https://edrus-telegram.naimatwxm03.workers.dev` `[VERIFY the code matches the repo version — the existing deployment predates this and may differ]`
+
+**In n8n:** Credentials → the Telegram credential → **Base URL** → set to the Worker URL (no trailing slash, no `/bot` suffix — n8n appends `/bot<token>/<method>` itself). Default is `https://api.telegram.org`; that default is what fails.
+
+**Every Telegram node needs this**, including the Trigger and every Send node, because they all read the base URL from the credential. Set it once on the credential and all nodes inherit it.
+
+**Also covers file downloads.** n8n fetches photos from `{baseUrl}/file/bot<token>/<path>`. The Worker forwards whole paths untouched, so `/file/` works with no extra configuration — which Build 1 depends on entirely, since every receipt arrives as a photo.
+
+**Diagnosis order when Telegram misbehaves:**
+1. Publish returns 504 → outbound blocked → Base URL not set to the Worker
+2. Publish succeeds, `getWebhookInfo` shows `url` set with `last_error_message: 403` → inbound blocked → Cloudflare WAF rule, see §4a
+3. `url` set, no error, still nothing → look in n8n Executions; the message arrived and a node failed
+
 ## 4b. Envelope details — found while building step 1
 
 Three Telegram payload details that are invisible until they bite:

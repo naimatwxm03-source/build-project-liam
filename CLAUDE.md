@@ -21,7 +21,8 @@ Never skip `automation-cto` on a fuzzy idea. A brief on an undecided architectur
 - **OCR/STT:** Yandex Vision OCR, Yandex SpeechKit. IAM tokens expire in 12h — refresh on a schedule.
 - **Storage:** Postgres (separate DB from n8n's own), Redis, Qdrant. Never n8n's Simple Vector Store — in-memory, dies on restart.
 - **CRM:** Bitrix24. Client-owned credentials, always.
-- **Channels:** Telegram is not blocked and is a valid primary. Always build the channel-adapter pattern so Telegram → VK is a config change. MAX needs a verified RU legal entity — blocked until ИП/ООО exists.
+- **Telegram from the VPS:** `api.telegram.org` is **not reachable outbound** from the Timeweb box. Every Telegram credential must set **Base URL** to the Cloudflare Worker proxy (`https://edrus-telegram.naimatwxm03.workers.dev`), never the default `https://api.telegram.org`. Symptom when wrong: Publish fails with a 504 and no webhook is ever registered. Worker source: `builds/01-receipt-bot/cloudflare-worker-telegram-proxy.js`.
+- **Channels:** Telegram is not blocked for users and is a valid primary. Always build the channel-adapter pattern so Telegram → VK is a config change. MAX needs a verified RU legal entity — blocked until ИП/ООО exists.
 - **Payability rule:** nothing on a critical path may require a card that doesn't work from Russia.
 
 ## Conventions
