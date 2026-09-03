@@ -78,6 +78,25 @@ Check `url` is the Cloudflare domain, `pending_update_count` is 0, and `last_err
 
 Same constraint applies to Build 2's chat widget webhook and Build 3's Voximplant callback. Solve it once here.
 
+## 4b. Envelope details — found while building step 1
+
+Three Telegram payload details that are invisible until they bite:
+
+**1. `photo[]` — take the LAST element, never the first.** Telegram sends the same image at several resolutions, smallest first. `photo[0]` is roughly a 90px thumbnail. Feeding that to Vision OCR produces garbage, and the failure presents as *"Vision OCR is inaccurate"* rather than *"we sent it a thumbnail"* — so you would tune the wrong thing for an hour. Use `photo[photo.length - 1]`.
+
+**2. `text` must fall back to `caption`.** A photo sent with a note carries that note in `message.caption`, not `message.text`. Without the fallback the user's text silently disappears — and a receipt photo captioned "обед с клиентом" is exactly the case where the caption matters.
+
+**3. `chat_id` belongs in the envelope, separate from `user_id`.** In a private chat `chat.id === from.id`, so replying to `user_id` appears to work — until the bot is added to a group, where `chat.id` is negative (`-1001234567890`) and every reply fails. The reply address is also channel-specific (`chat_id` on Telegram, `peer_id` on VK), so the channel-adapter pattern needs it as its own field or the adapter stops being a config change.
+
+**Envelope, final:**
+`{ channel, user_id, chat_id, session_key, text, file_id, message_id, ts }`
+
+**Other step-1 decisions worth keeping:**
+- `appendAttribution: false` on Telegram send nodes — otherwise every reply carries an "automated with n8n" footer, which is wrong in a client demo.
+- Empty text yields `""`, not `undefined`. Telegram's API returns 400 on an empty message body, so a caption-less photo must reply with placeholder text.
+- `ts` converted from Telegram's unix seconds to ISO-8601 at the envelope, so no casting downstream.
+- Trigger `downloadFiles` stays **off** until step 4 — no reason to download every photo before OCR exists.
+
 ## 5. Data
 **In:** `{ message_id, from.id, from.username, text?, photo[]?, date }`
 
