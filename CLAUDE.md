@@ -6,6 +6,7 @@ Four n8n agent builds from Liam's course, rebuilt RU-native for NXAI / N-Enterpr
 - `docs/00-course-review.md` — the verdict on the course and per-build portability
 - `docs/ru-stack-map.md` — vendor → RU substitute, authoritative
 - `docs/vscode-workflow.md` — setup and the build loop
+- `docs/05-n8n-update-runbook.md` — upgrading the VPS instance, with rollback
 
 ## Pipeline
 `idea → /automation-cto → /n8n-brief → Claude Code writes workflow JSON → import to n8n → deploy`
@@ -13,7 +14,7 @@ Four n8n agent builds from Liam's course, rebuilt RU-native for NXAI / N-Enterpr
 Never skip `automation-cto` on a fuzzy idea. A brief on an undecided architecture is a well-formatted wrong answer.
 
 ## Hard constraints — these are environment facts, not preferences
-- **Runtime:** n8n 2.36.8, self-hosted, Docker behind Nginx, Timeweb VPS. No n8n Cloud features (including "Build with AI").
+- **Runtime:** n8n 2.36.8, self-hosted, Docker behind Nginx, Timeweb VPS. No n8n Cloud features (including "Build with AI"). Pin the image tag in `/root/n8n/docker-compose.yml` — never `:latest`, never `next`/`beta`. Upgrades follow `docs/05-n8n-update-runbook.md` (next target: 2.37.10); a restart re-registers every webhook, so `getWebhookInfo` is part of the upgrade, not an afterthought.
 - **Models on the VPS:** **Qwen 3 via Yandex AI Studio**, OpenAI-compatible endpoint `https://llm.api.cloud.yandex.net/v1`, model `gpt://<folder_id>/qwen3-235b-a22b-fp8/latest`, auth `Authorization: Api-Key <key>`. Use n8n's **OpenAI Chat Model** node — no custom HTTP node, no OAuth, no cert-chain workaround. YandexGPT then GigaChat as fallbacks (one-field switch). DeepSeek on the same endpoint for reasoning-heavy steps. Anthropic/OpenAI/Google direct calls **fail from that box**. Claude belongs in VS Code, never in a workflow node.
 - **One-account rule:** LLM, Vision OCR, SpeechKit and Geocoder all come from the same Yandex Cloud account — one credential, one bill, one auth pattern.
 - **Model cost:** Yandex marks Chinese models up ~30x vs direct; that markup buys 152-ФЗ compliance and a rouble invoice, so it is correct for client work. Never route a client through a payment intermediary. Cut cost by cutting tokens, and put the cloud account in the client's name.
