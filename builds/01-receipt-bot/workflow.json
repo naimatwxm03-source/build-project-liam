@@ -1,0 +1,146 @@
+{
+  "name": "01 Expense Bot — Step 1 (Echo)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "a1f0c3d2-1e4b-4a90-9c11-0b7d5e2a1001",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -220,
+        0
+      ],
+      "webhookId": "3f9c8e17-25a4-4d6b-b0f2-7a1c9e4d5b60",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1e2d3c4-0001-4000-8000-000000000001",
+              "name": "channel",
+              "value": "telegram",
+              "type": "string"
+            },
+            {
+              "id": "f1e2d3c4-0002-4000-8000-000000000002",
+              "name": "user_id",
+              "value": "={{ $json.message?.from?.id?.toString() ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "f1e2d3c4-0008-4000-8000-000000000008",
+              "name": "chat_id",
+              "value": "={{ $json.message?.chat?.id?.toString() ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "f1e2d3c4-0003-4000-8000-000000000003",
+              "name": "session_key",
+              "value": "={{ 'telegram:' + ($json.message?.from?.id ?? 'unknown') }}",
+              "type": "string"
+            },
+            {
+              "id": "f1e2d3c4-0004-4000-8000-000000000004",
+              "name": "text",
+              "value": "={{ $json.message?.text ?? $json.message?.caption ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "f1e2d3c4-0005-4000-8000-000000000005",
+              "name": "file_id",
+              "value": "={{ $json.message?.photo?.length ? $json.message.photo[$json.message.photo.length - 1].file_id : ($json.message?.document?.file_id ?? '') }}",
+              "type": "string"
+            },
+            {
+              "id": "f1e2d3c4-0006-4000-8000-000000000006",
+              "name": "message_id",
+              "value": "={{ $json.message?.message_id?.toString() ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "f1e2d3c4-0007-4000-8000-000000000007",
+              "name": "ts",
+              "value": "={{ $json.message?.date ? new Date($json.message.date * 1000).toISOString() : $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "b2e1d4c3-2f5a-4b81-8d22-1c8e6f3b2002",
+      "name": "Normalize Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        20,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "=Получено: {{ $json.text || '(без текста)' }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "c3d2e5f4-3a6b-4c72-9e33-2d9f7a4c3003",
+      "name": "Send Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Message": {
+      "main": [
+        [
+          {
+            "node": "Send Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
