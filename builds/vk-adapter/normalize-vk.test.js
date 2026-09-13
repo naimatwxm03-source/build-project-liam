@@ -54,7 +54,10 @@ test('peer_id differs from from_id in a group chat, and the reply goes to peer_i
   assert.strictEqual(e.session_key, 'vk:555', 'memory is per-person, not per-chat');
 });
 
-test('picks the widest photo rendition regardless of array order', () => {
+test('picks the best rendition under the cap, regardless of array order', () => {
+  // Was "widest wins". The 2560px original is now deliberately skipped: it costs
+  // download, base64 expansion and Vision upload time for detail a thermal slip
+  // does not need. See MAX_USEFUL_WIDTH.
   const e = normalizeVkEvent(event({}, {
     attachments: [{
       type: 'photo',
@@ -63,12 +66,13 @@ test('picks the widest photo rendition regardless of array order', () => {
         sizes: [
           { type: 'm', url: 'https://cdn.vk/m.jpg', width: 130, height: 100 },
           { type: 'w', url: 'https://cdn.vk/w.jpg', width: 2560, height: 1920 },
+          { type: 'z', url: 'https://cdn.vk/z.jpg', width: 1080, height: 810 },
           { type: 'x', url: 'https://cdn.vk/x.jpg', width: 604, height: 453 },
         ],
       },
     }],
   }));
-  assert.strictEqual(e.file_url, 'https://cdn.vk/w.jpg');
+  assert.strictEqual(e.file_url, 'https://cdn.vk/z.jpg');
   assert.strictEqual(e.file_kind, 'photo');
 });
 
@@ -181,4 +185,37 @@ test('replyRandomId never returns 0, even for an empty seed', () => {
   for (const seed of ['', null, undefined, 0]) {
     assert.ok(replyRandomId(seed) > 0, `seed ${JSON.stringify(seed)} produced 0`);
   }
+});
+
+const { MAX_USEFUL_WIDTH } = require('./normalize-vk');
+
+test('picks the biggest rendition at or below the OCR width cap', () => {
+  const url = largestPhotoUrl({ sizes: [
+    { type: 'm', url: 'm', width: 130 },
+    { type: 'x', url: 'x', width: 604 },
+    { type: 'z', url: 'z', width: 1080 },
+    { type: 'w', url: 'w', width: 2560 },
+  ]});
+  assert.strictEqual(url, 'z', 'must not fetch the 2560px original');
+});
+
+test('takes a rendition exactly on the cap', () => {
+  const url = largestPhotoUrl({ sizes: [
+    { type: 'x', url: 'x', width: 604 },
+    { type: 'y', url: 'y', width: MAX_USEFUL_WIDTH },
+  ]});
+  assert.strictEqual(url, 'y');
+});
+
+test('when every rendition is oversized, takes the smallest rather than none', () => {
+  const url = largestPhotoUrl({ sizes: [
+    { type: 'w', url: 'w', width: 2560 },
+    { type: 'z', url: 'z', width: 1800 },
+  ]});
+  assert.strictEqual(url, 'z');
+});
+
+test('still returns a url when widths are missing entirely', () => {
+  const url = largestPhotoUrl({ sizes: [{ type: 'm', url: 'm' }, { type: 'z', url: 'z' }] });
+  assert.ok(url, 'must not return empty');
 });

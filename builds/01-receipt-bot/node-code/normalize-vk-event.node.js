@@ -10,6 +10,19 @@
  * copy inside a workflow.json.
  */
 
+/**
+ * Widest rendition worth fetching, in pixels.
+ *
+ * VK keeps originals up to 2560px. For receipt OCR that is wasted: the payload
+ * is downloaded, base64-expanded by a third, and uploaded again to Vision, and
+ * every one of those steps is on the user's clock. Around 1600px the characters
+ * on a thermal slip are still comfortably legible.
+ *
+ * If nothing is at or below the cap, the SMALLEST rendition above it is used —
+ * never no image at all.
+ */
+const MAX_USEFUL_WIDTH = 1600;
+
 /** VK photo size types, worst to best. Used only as a tiebreak when width is absent. */
 const SIZE_RANK = ['s', 'm', 'o', 'p', 'q', 'r', 'x', 'y', 'z', 'w'];
 
@@ -20,20 +33,31 @@ const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'heic', 'webp', 'bmp']);
  * Pick the largest available rendition of a VK photo.
  * VK does not guarantee `sizes` is ordered, and older payloads omit `width`.
  */
-function largestPhotoUrl(photo) {
-  const sizes = Array.isArray(photo && photo.sizes) ? photo.sizes : [];
+function largestPhotoUrl(photo, maxWidth = MAX_USEFUL_WIDTH) {
+  const sizes = (Array.isArray(photo && photo.sizes) ? photo.sizes : []).filter(
+    (s) => s && s.url
+  );
   if (sizes.length === 0) return '';
 
+  const better = (a, b) => {
+    const byWidth = (a.width || 0) - (b.width || 0);
+    if (byWidth !== 0) return byWidth > 0;
+    return SIZE_RANK.indexOf(a.type) > SIZE_RANK.indexOf(b.type);
+  };
+
+  // Biggest that still fits the cap — the sweet spot for OCR cost vs legibility.
   let best = null;
   for (const s of sizes) {
-    if (!s || !s.url) continue;
-    if (best === null) { best = s; continue; }
-
-    const byWidth = (s.width || 0) - (best.width || 0);
-    if (byWidth > 0) { best = s; continue; }
-    if (byWidth === 0 && SIZE_RANK.indexOf(s.type) > SIZE_RANK.indexOf(best.type)) best = s;
+    if ((s.width || 0) > maxWidth) continue;
+    if (best === null || better(s, best)) best = s;
   }
-  return best ? best.url : '';
+  if (best) return best.url;
+
+  // Everything is oversized (or widths are missing): take the smallest of them
+  // rather than returning nothing.
+  let smallest = sizes[0];
+  for (const s of sizes) if (better(smallest, s)) smallest = s;
+  return smallest.url;
 }
 
 /** Lowercase extension of a VK doc, '' when absent. */
