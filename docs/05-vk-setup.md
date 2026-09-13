@@ -45,41 +45,89 @@ Both are off by default, and the second one is easy to miss.
    - ⬜ Leave everything else unchecked — управление сообществом, истории, стена, товары и заказы are all more access than the bot needs
 3. Confirm. VK shows the token **once**.
 
-**Put it straight into `.env` on the VPS. Do not paste it into this chat.**
+**Put it straight into the n8n credential, not a file. Do not paste it into this chat.**
 
-```bash
-# on the VPS, in /root/n8n/.env  (or wherever your n8n env lives)
-VK_GROUP_TOKEN=vk1.a.xxxxx...
-VK_GROUP_ID=123456789
-VK_CALLBACK_SECRET=<invent a long random string, see below>
-VK_CONFIRMATION_STRING=<from Step 5, VK shows it to you>
+The token lives in an n8n **Query Auth** credential named `VK Group Token`
+(parameter name `access_token`), created on the **Send Reply** node. It never
+touches `docker-compose.yml` and never appears in exported workflow JSON.
 
-# Required, or the confirmation reply comes back empty and VK rejects the
-# address with no error visible anywhere in n8n.
-N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+### Where the other values live — read this, it is not a `.env` file
+
+**Verified on this VPS 2026-09-13:** n8n here takes its environment from the
+`environment:` list inside `/root/n8n/docker-compose.yml`. **There is no `.env`
+file**, and creating one does nothing — `docker-compose.yml` does not reference
+one. Add variables to that list instead:
+
+```yaml
+    environment:
+      - N8N_HOST=n8n.n-enterprise.ru
+      - N8N_ENCRYPTION_KEY=...
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - VK_CALLBACK_SECRET=<openssl rand -hex 24>
+      - VK_CONFIRMATION_STRING=<VK shows it on the Callback API page>
 ```
 
-Generate the secret yourself — it's yours to choose, not VK's:
+`N8N_BLOCK_ENV_ACCESS_IN_NODE=false` is required, or `$env` resolves to nothing,
+the confirmation reply goes out empty, and VK rejects the address with no error
+visible anywhere in n8n.
+
+`VK_GROUP_ID` is **not** needed by n8n — nothing in the workflow reads it. Keep
+it for the `groups.getCallbackServers` check only.
+
+To add a variable without the value ever reaching your screen or this chat:
 
 ```bash
-openssl rand -hex 24
+cd /root/n8n
+export VK_SECRET=$(openssl rand -hex 24)
+python3 - <<'EOF'
+import os
+path = "docker-compose.yml"
+lines = open(path).readlines()
+out = []
+for line in lines:
+    out.append(line)
+    if "N8N_ENCRYPTION_KEY" in line:
+        indent = line[:len(line) - len(line.lstrip())]
+        out.append(f"{indent}- VK_CALLBACK_SECRET={os.environ['VK_SECRET']}\n")
+open(path, "w").writelines(out)
+EOF
+unset VK_SECRET
+docker-compose down && docker-compose up -d
 ```
 
-To verify the file never leaks a value:
+Confirm names without values:
 
 ```bash
-sed 's/=.*/=***/' /root/n8n/.env
+grep -E "BLOCK_ENV_ACCESS|CALLBACK_SECRET|CONFIRMATION" docker-compose.yml | sed 's/=.*/=***/'
 ```
+
+### Also check WEBHOOK_URL
+
+```bash
+grep WEBHOOK_URL docker-compose.yml
+```
+
+It must be `https://n8n.n-enterprise.ru/`. On this box it was found pointing at
+`https://tg-in.naimatwxm03.workers.dev/` — a leftover from the abandoned
+Telegram inbound Worker. That setting controls the URL n8n generates for **every**
+trigger, so a stale value hands VK a dead address. **VK needs no Cloudflare
+anything** — its servers are Russian and reach the VPS directly.
 
 ## Step 4 — Find your group_id
 
 **Управление** → **Работа с API** → it's shown at the top. Or: open the community, the URL `vk.com/club123456789` — the number is the group id. If you set a custom short address, use **Управление** → **Настройки** → the id is still listed there.
 
-Numeric only. No `club` prefix. Write it into `VK_GROUP_ID`.
+Numeric only. No `club` prefix.
+
+> Live value for NXAI AUTOMATION: **`238091644`**.
 
 ---
 
 # ⛔ STOP HERE. Tell me Steps 1–4 are done.
+
+> **Status: this was completed and verified end to end on 2026-09-13.** VK
+> Callback confirmed, `message_new` subscribed, echo reply received. The notes
+> below are the reproduction procedure for the next community, not open work.
 
 I need to build and activate the n8n workflow before VK is allowed to probe the address. Continuing past this point without it wastes a confirmation attempt.
 
@@ -92,8 +140,19 @@ I need to build and activate the n8n workflow before VK is allowed to probe the 
 3. **Адрес:** the production webhook URL I give you. It looks like:
    `https://n8n.n-enterprise.ru/webhook/vk-receipt`
 4. **Секретный ключ:** paste the same value you put in `VK_CALLBACK_SECRET`
-5. VK displays **«Строка, которую должен вернуть сервер»** — a short string like `a1b2c3d4`. **Copy it into `VK_CONFIRMATION_STRING` in `.env` and restart n8n**, then come back.
-6. Press **Подтвердить**.
+5. VK displays **«Строка, которую должен вернуть сервер»** — a short string like `a1b2c3d4`. **Copy it into `VK_CONFIRMATION_STRING` in `docker-compose.yml` and restart n8n**, then come back.
+6. **Prove the handshake before pressing anything.** From the VPS:
+   ```bash
+   curl -s -X POST https://n8n.n-enterprise.ru/webhook/vk-receipt \
+     -H 'Content-Type: application/json' \
+     -d '{"type":"confirmation","group_id":<your group_id>}'
+   ```
+   It must print the confirmation string and nothing else. If it does, VK cannot fail.
+7. Press **Подтвердить**.
+
+> **Check the address character by character.** `vk-receipt` is the path in the
+> workflow. A near-miss like `vk-bot` returns 404 and VK reports only a generic
+> failure.
 
 **Expected:** the address turns green / shows «Подтверждён».
 
