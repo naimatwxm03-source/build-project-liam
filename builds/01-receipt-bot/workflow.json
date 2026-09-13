@@ -625,7 +625,7 @@
               "id": "e1000000-0000-4000-8000-000000000033",
               "name": "reply_text",
               "type": "string",
-              "value": "=✅ Записал\n\n{{ $json.vendor || 'Продавец не распознан' }}\n{{ $json.total }} {{ $json.currency }}\n{{ $json.expense_date }}\nКатегория: {{ $json.category }}{{ $json.repairs ? '\\n\\n⚠️ Исправлено при распознавании: ' + $json.repairs : '' }}"
+              "value": "=✅ Записал\n\n{{ $json.vendor || 'Продавец не распознан' }}\n{{ $json.total }} {{ $json.currency }}\n{{ $('Validate Receipt').item.json.expense_date }}\nКатегория: {{ $json.category }}{{ $json.repairs ? '\\n\\n⚠️ Исправлено при распознавании: ' + $json.repairs : '' }}"
             }
           ]
         },
@@ -639,7 +639,8 @@
       "position": [
         2700,
         -40
-      ]
+      ],
+      "notes": "Reads expense_date from Validate Receipt, not $json. The Data Table node returns the inserted row with the date coerced to a Date object, which renders as 'Fri Sep 04 2026 04:00:00 GMT+0000' in a message."
     },
     {
       "parameters": {
@@ -649,7 +650,7 @@
               "id": "e1000000-0000-4000-8000-000000000035",
               "name": "reply_text",
               "type": "string",
-              "value": "=⚠️ Записал, но проверьте\n\n{{ $json.vendor || 'Продавец не распознан' }}\n{{ $json.total != null ? $json.total + ' ' + $json.currency : 'Сумма не распознана' }}\n{{ $json.expense_date || 'Дата не распознана' }}{{ $json.date_assumed ? ' (дата отправки)' : '' }}\n\n{{ $json.review_reason }}"
+              "value": "=⚠️ Записал, но проверьте\n\n{{ $json.vendor || 'Продавец не распознан' }}\n{{ $json.total != null ? $json.total + ' ' + $json.currency : 'Сумма не распознана' }}\n{{ $('Validate Receipt').item.json.expense_date || 'Дата не распознана' }}{{ $('Validate Receipt').item.json.date_assumed ? ' (дата отправки)' : '' }}\n\n{{ $json.review_reason }}"
             }
           ]
         },
@@ -818,6 +819,52 @@
         3350,
         100
       ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.vk.com/method/messages.send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "peer_id",
+              "value": "={{ $json.chat_id }}"
+            },
+            {
+              "name": "random_id",
+              "value": "={{ $json.reply_random_id + 1 }}"
+            },
+            {
+              "name": "message",
+              "value": "🔍 Читаю чек…"
+            },
+            {
+              "name": "v",
+              "value": "5.199"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e2000000-0000-4000-8000-000000000001",
+      "name": "Ack — Reading",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        -160
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "VK Group Token"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Perceived latency is the thing a client judges. OCR plus a 235B model takes tens of seconds; an instant 'reading it' reply makes that wait legible instead of looking broken. random_id+1 keeps it distinct from the real reply. onError continues — a failed ack must never block the actual work."
     }
   ],
   "connections": {
@@ -934,7 +981,7 @@
       "main": [
         [
           {
-            "node": "Has Image?",
+            "node": "Ack — Reading",
             "type": "main",
             "index": 0
           }
@@ -1161,6 +1208,17 @@
         [
           {
             "node": "Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ack — Reading": {
+      "main": [
+        [
+          {
+            "node": "Has Image?",
             "type": "main",
             "index": 0
           }
