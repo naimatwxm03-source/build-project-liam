@@ -38,11 +38,11 @@ Both are off by default, and the second one is easy to miss.
 ## Step 3 — Create the access token
 
 1. **Управление** → **Работа с API** → tab **Ключи доступа** → **Создать ключ**
-2. Tick these permissions:
+2. Tick these permissions (confirmed against the real dialog — no separate audio scope exists; voice messages arrive as message attachments and are already covered by "Сообщения сообщества"):
    - ✅ **Сообщения сообщества** — required, this is how the bot reads and sends
    - ✅ **Фотографии** — required for Build 1, receipts arrive as photo attachments
    - ✅ **Документы** — required, some clients send receipts as files not photos
-   - ✅ **Аудиозаписи** — required for Build 3A voice messages
+   - ⬜ Leave everything else unchecked — управление сообществом, истории, стена, товары и заказы are all more access than the bot needs
 3. Confirm. VK shows the token **once**.
 
 **Put it straight into `.env` on the VPS. Do not paste it into this chat.**
