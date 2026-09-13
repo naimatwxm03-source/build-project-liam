@@ -45,6 +45,7 @@ const DIGIT_LOOKALIKES = {
 
 const AMOUNT_RE = /^\d{1,3}(?:['’  ]\d{3})*[.,]\d{2}$|^\d+[.,]\d{2}$/;
 const DATE_RE = /^(\d{2})\.(\d{2})\.(\d{2}|\d{4})$/;
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const INN_RE = /^\d{10}$|^\d{12}$/;
 const CARD_MASK_RE = /^\*{2,6}\d{4}$/;
 const ID_RE = /^\d{4,20}$/;
@@ -122,9 +123,33 @@ function parseAmount(raw) {
   return { ok: true, field: 'amount', value, repaired: r.repaired, raw };
 }
 
-/** "25.08.2026" / "25.08.26" -> ISO date, with real calendar validation. */
+/**
+ * Normalise the separators a receipt or a model might use.
+ *
+ * The prompt asks for ДД.ММ.ГГГГ, but a model can still answer "2026-08-25" or
+ * "25/08/2026". Rejecting those would raise a review flag on a date that was
+ * read perfectly — a false failure, which is worse than a real one because it
+ * trains the user to ignore the warnings.
+ *
+ * Runs BEFORE glyph repair, for the same reason amount noise does: a separator
+ * is not a digit and must not be fed to the lookalike map.
+ */
+function stripDateNoise(raw) {
+  if (typeof raw !== 'string') return raw;
+  return raw.trim().replace(/[\/\u2013\u2014]/g, '.');
+}
+
+/** "25.08.2026" / "25.08.26" / "2026-08-25" -> ISO, with calendar validation. */
 function parseDate(raw, { pivot = 70 } = {}) {
-  const r = repairToken(raw, DATE_RE);
+  const cleaned = stripDateNoise(raw);
+
+  // ISO first — "2026-08-25" would otherwise be mangled by separator swapping.
+  const iso = typeof cleaned === 'string' ? cleaned.match(ISO_DATE_RE) : null;
+  if (iso) {
+    return buildDate(Number(iso[3]), Number(iso[2]), Number(iso[1]), false, raw);
+  }
+
+  const r = repairToken(cleaned, DATE_RE);
   if (!r) return review('date', raw, 'unparseable_date');
 
   const m = r.value.match(DATE_RE);
@@ -133,6 +158,11 @@ function parseDate(raw, { pivot = 70 } = {}) {
   let year = Number(m[3]);
   if (m[3].length === 2) year += year <= pivot ? 2000 : 1900;
 
+  return buildDate(day, month, year, r.repaired, raw);
+}
+
+/** Shared calendar validation. Rejects 31.02 rather than rolling it into March. */
+function buildDate(day, month, year, repaired, raw) {
   const d = new Date(Date.UTC(year, month - 1, day));
   if (
     d.getUTCFullYear() !== year ||
@@ -141,14 +171,7 @@ function parseDate(raw, { pivot = 70 } = {}) {
   ) {
     return review('date', raw, 'invalid_calendar_date');
   }
-
-  return {
-    ok: true,
-    field: 'date',
-    value: d.toISOString().slice(0, 10),
-    repaired: r.repaired,
-    raw,
-  };
+  return { ok: true, field: 'date', value: d.toISOString().slice(0, 10), repaired, raw };
 }
 
 /** Official ФНС control-digit algorithm for 10- and 12-digit ИНН. */
@@ -258,6 +281,7 @@ module.exports = {
   DIGIT_LOOKALIKES,
   stripAmountNoise,
   stripCardNoise,
+  stripDateNoise,
   normalizeText,
   parseAmount,
   parseDate,

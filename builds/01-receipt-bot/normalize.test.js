@@ -26,6 +26,15 @@ function test(name, fn) {
   }
 }
 
+// Report on exit so tests appended below this point still run. Previously the
+// summary called process.exit() inline, which silently skipped anything added
+// after it — the suite reported green while not running the new cases.
+process.on('exit', () => {
+  console.log(`\n${passed} passed, ${failed} failed`);
+  if (failed > 0) process.exitCode = 1;
+});
+
+
 function section(title) {
   console.log(`\n${title}`);
 }
@@ -337,5 +346,30 @@ test('the real ИНН from the slip passes its checksum', () => {
   assert.strictEqual(N.parseInn('7720425673').ok, true);
 });
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+
+test('accepts the date formats a model might return, not just the printed one', () => {
+  for (const raw of ['25.08.2026', '25.08.26', '2026-08-25', '25/08/2026']) {
+    const r = N.parseDate(raw);
+    assert.strictEqual(r.ok, true, `${raw} rejected: ${r.reason}`);
+    assert.strictEqual(r.value, '2026-08-25', `${raw} -> ${r.value}`);
+  }
+});
+
+test('a real calendar check still rejects impossible dates', () => {
+  for (const raw of ['31.02.2026', '32.01.2026', '25.13.2026', '2026-02-31']) {
+    const r = N.parseDate(raw);
+    assert.strictEqual(r.ok, false, `${raw} should not parse`);
+  }
+});
+
+test('a missing date is a review reason, never a silent default to today', () => {
+  for (const raw of ['', '   ', 'не указано', null, undefined]) {
+    const r = N.parseDate(raw);
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.value, undefined, 'must not invent a date');
+  }
+});
+
+test('separator normalisation cannot turn text into a date', () => {
+  assert.strictEqual(N.parseDate('дата/не/видна').ok, false);
+});
