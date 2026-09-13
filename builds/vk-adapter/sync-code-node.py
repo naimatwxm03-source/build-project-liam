@@ -120,13 +120,32 @@ return $input.all().map((item) => {
     date: extracted.expense_date || '',
   });
 
-  const reasons = checked.review.map((r) => `${r.field}: ${r.reason}`);
+  const reasons = [];
+  let dateAssumed = false;
+  let expenseDate = checked.data.date || null;
+
+  for (const r of checked.review) {
+    // Many receipts print the date in a fiscal block people crop out of the
+    // photo. Refusing the whole expense over that trains users to stop sending
+    // receipts. Fall back to the day the photo was sent, record that the date
+    // is an assumption, and keep the row flagged so a human can correct it.
+    // This is an assumption made in the open, not an invented value.
+    if (r.field === 'date') {
+      expenseDate = String(envelope.ts || '').slice(0, 10) || null;
+      dateAssumed = true;
+      reasons.push('дата не найдена — поставил дату отправки');
+      continue;
+    }
+    reasons.push(`${r.field}: ${r.reason}`);
+  }
+
   const confidence = Number(extracted.confidence);
 
   return { json: {
     ...envelope,
     vendor: checked.data.vendor || '',
-    expense_date: checked.data.date || null,
+    expense_date: expenseDate,
+    date_assumed: dateAssumed,
     total: checked.data.amount == null ? null : checked.data.amount,
     currency: extracted.currency || 'RUB',
     category: extracted.category || 'прочее',
@@ -160,9 +179,27 @@ def build_code(source_rel: str, glue: str) -> str:
     return src.rstrip() + "\n" + glue
 
 
+PASTE_DIR = REPO / "builds/01-receipt-bot/node-code"
+
+
+def write_paste_copies(codes: dict) -> None:
+    """Emit each Code node's contents as a standalone .js file.
+
+    Re-importing a workflow wipes the credentials selected in the UI, so for a
+    live instance the cheap update path is: open the raw file, select all, paste
+    over the node's editor. These files exist purely for that.
+    """
+    PASTE_DIR.mkdir(parents=True, exist_ok=True)
+    for name, code in codes.items():
+        slug = name.lower().replace(" ", "-")
+        (PASTE_DIR / f"{slug}.node.js").write_text(code, encoding="utf-8")
+
+
 def main() -> int:
     check_only = "--check" in sys.argv
     codes = {name: build_code(rel, glue) for name, (rel, glue) in NODE_SOURCES.items()}
+    if not check_only:
+        write_paste_copies(codes)
     drifted, touched = [], []
 
     for rel in WORKFLOWS:
