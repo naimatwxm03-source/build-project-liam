@@ -174,6 +174,61 @@ function buildDate(day, month, year, repaired, raw) {
   return { ok: true, field: 'date', value: d.toISOString().slice(0, 10), repaired, raw };
 }
 
+
+/**
+ * Validate a receipt's line items and reconcile them against the printed total.
+ *
+ * Two jobs. The obvious one is turning the model's item list into typed rows.
+ * The valuable one is the cross-check: a receipt states its own total, and the
+ * items must add up to it. When they do not, either OCR dropped a line or the
+ * model invented one — and either way the row should not be trusted silently.
+ *
+ * The tolerance is one kopeck per item, which absorbs honest rounding on
+ * per-unit prices without admitting a missing line.
+ */
+function parseItems(rawItems, total) {
+  const list = Array.isArray(rawItems) ? rawItems : [];
+  const items = [];
+  const problems = [];
+
+  for (const raw of list) {
+    if (!raw) continue;
+    const name = normalizeText(raw.name || raw.title || '');
+    const sum = parseAmount(raw.sum == null ? '' : String(raw.sum));
+    const price = parseAmount(raw.price == null ? '' : String(raw.price));
+    const qtyNum = Number(raw.qty);
+    const qty = Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : 1;
+
+    // A nameless or unpriced line is noise from OCR, not a purchase.
+    if (!name && !sum.ok) continue;
+
+    items.push({
+      name: name || '(без названия)',
+      qty,
+      price: price.ok ? price.value : null,
+      sum: sum.ok ? sum.value : null,
+    });
+    if (!sum.ok) problems.push(`позиция «${name || '?'}» без суммы`);
+  }
+
+  const priced = items.filter((i) => i.sum !== null);
+  const itemsTotal = priced.reduce((a, i) => a + i.sum, 0);
+  const rounded = Math.round(itemsTotal * 100) / 100;
+
+  let reconciled = null;
+  if (items.length > 0 && typeof total === 'number' && Number.isFinite(total)) {
+    const tolerance = Math.max(0.01, items.length * 0.01);
+    reconciled = Math.abs(rounded - total) <= tolerance;
+    if (!reconciled) {
+      problems.push(
+        `сумма позиций ${rounded.toFixed(2)} не сходится с итогом ${total.toFixed(2)}`
+      );
+    }
+  }
+
+  return { items, itemsTotal: rounded, reconciled, problems };
+}
+
 /** Official ФНС control-digit algorithm for 10- and 12-digit ИНН. */
 function innChecksumValid(inn) {
   const d = inn.split('').map(Number);
@@ -289,6 +344,7 @@ module.exports = {
   parseCardMask,
   parseId,
   parseReceipt,
+  parseItems,
   innChecksumValid,
   repairToken,
 };

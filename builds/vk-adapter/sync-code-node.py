@@ -97,6 +97,7 @@ return $input.all().map((item) => {
       review_reason: 'Модель вернула не-JSON — проверьте вручную',
       vendor: '', expense_date: null, total: null, currency: 'RUB',
       category: 'прочее', confidence: 0,
+      items: [], items_json: '[]', items_count: 0, items_total: 0, items_reconciled: null,
       raw_text: String(src.text == null ? '' : src.text).slice(0, 2000),
     }};
   }
@@ -110,6 +111,7 @@ return $input.all().map((item) => {
       review_reason: 'На фото несколько чеков — отправьте по одному',
       vendor: '', expense_date: null, total: null, currency: 'RUB',
       category: 'прочее', confidence: 0,
+      items: [], items_json: '[]', items_count: 0, items_total: 0, items_reconciled: null,
       raw_text: (extracted.raw_text || '').slice(0, 2000),
     }};
   }
@@ -119,6 +121,8 @@ return $input.all().map((item) => {
     amount: extracted.total == null ? '' : String(extracted.total),
     date: extracted.expense_date || '',
   });
+
+  const parsedItems = parseItems(extracted.items, checked.data.amount);
 
   const reasons = [];
   let dateAssumed = false;
@@ -139,6 +143,10 @@ return $input.all().map((item) => {
     reasons.push(`${r.field}: ${r.reason}`);
   }
 
+  // A receipt states its own total. If the lines do not add up to it, OCR lost
+  // one or the model invented one — flag rather than trust.
+  for (const p of parsedItems.problems) reasons.push(p);
+
   const confidence = Number(extracted.confidence);
 
   return { json: {
@@ -152,6 +160,11 @@ return $input.all().map((item) => {
     confidence: Number.isFinite(confidence) ? confidence : 0,
     needs_review: reasons.length > 0,
     review_reason: reasons.join('; '),
+    items: parsedItems.items,
+    items_json: JSON.stringify(parsedItems.items),
+    items_count: parsedItems.items.length,
+    items_total: parsedItems.itemsTotal,
+    items_reconciled: parsedItems.reconciled,
     repairs: checked.repairs.map((r) => `${r.field}: ${r.raw} -> ${r.value}`).join('; '),
     raw_text: (extracted.raw_text || '').slice(0, 2000),
   }};
