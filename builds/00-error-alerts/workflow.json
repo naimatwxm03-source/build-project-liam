@@ -1,0 +1,116 @@
+{
+  "name": "00 Error Alerts — VK",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "f1000000-0000-4000-8000-000000000001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        0
+      ],
+      "notes": "Fires when ANY workflow that names this one as its error workflow fails. Set it per workflow: Workflow Settings -> Error Workflow."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1000000-0000-4000-8000-000000000090",
+              "name": "alert_text",
+              "type": "string",
+              "value": "=🔴 Сбой в n8n\n\nWorkflow: {{ $json.workflow.name }}\nУзел: {{ $json.execution?.lastNodeExecuted || 'неизвестно' }}\nВремя: {{ $now.setZone('Europe/Samara').toFormat('dd.MM.yyyy HH:mm') }}\n\n{{ ($json.execution?.error?.message || 'Без сообщения').toString().slice(0, 500) }}\n\n{{ $json.execution?.url || '' }}"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "f1000000-0000-4000-8000-000000000002",
+      "name": "Build Alert",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -100,
+        0
+      ],
+      "notes": "Names the workflow, the node that died and the error, and links straight to the failed execution. An alert you cannot act on is noise."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.vk.com/method/messages.send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "peer_id",
+              "value": "={{ $env.VK_ADMIN_PEER_ID }}"
+            },
+            {
+              "name": "random_id",
+              "value": "={{ Math.floor(Date.now() / 1000) }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.alert_text }}"
+            },
+            {
+              "name": "v",
+              "value": "5.199"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f1000000-0000-4000-8000-000000000003",
+      "name": "Alert Naimat On VK",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        0
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "VK Group Token"
+        }
+      },
+      "notes": "Goes to VK_ADMIN_PEER_ID — your own VK id, not the failing user's. random_id is clock-based here on purpose: two separate failures must both get through, unlike a retried reply which must not."
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert": {
+      "main": [
+        [
+          {
+            "node": "Alert Naimat On VK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
