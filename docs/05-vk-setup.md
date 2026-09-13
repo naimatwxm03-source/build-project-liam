@@ -53,6 +53,10 @@ VK_GROUP_TOKEN=vk1.a.xxxxx...
 VK_GROUP_ID=123456789
 VK_CALLBACK_SECRET=<invent a long random string, see below>
 VK_CONFIRMATION_STRING=<from Step 5, VK shows it to you>
+
+# Required, or the confirmation reply comes back empty and VK rejects the
+# address with no error visible anywhere in n8n.
+N8N_BLOCK_ENV_ACCESS_IN_NODE=false
 ```
 
 Generate the secret yourself — it's yours to choose, not VK's:

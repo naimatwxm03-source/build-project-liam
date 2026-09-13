@@ -1,0 +1,407 @@
+{
+  "name": "VK Adapter — Echo (confirmation + secret + reply)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vk-receipt",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000001",
+      "name": "VK Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        0
+      ],
+      "webhookId": "9b3e1f42-77c0-4d18-9a55-3e6b2c4a1f90",
+      "notes": "responseMode MUST be responseNode. The default returns JSON, and VK rejects the address unless the confirmation reply is the bare string."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c0000000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.body.type }}",
+              "rightValue": "confirmation",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000002",
+      "name": "Is Confirmation?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $env.VK_CONFIRMATION_STRING }}",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000003",
+      "name": "Respond Confirmation",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -200,
+        -140
+      ],
+      "notes": "Bare plain text, nothing else. Needs N8N_BLOCK_ENV_ACCESS_IN_NODE=false for $env to resolve."
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "ok",
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000004",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -200,
+        120
+      ],
+      "notes": "Answer FIRST, think after. VK retries a slow endpoint and a retry means the same event processed twice. Execution continues past this node."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c0000000-0000-4000-8000-000000000002",
+              "leftValue": "={{ $json.body.secret }}",
+              "rightValue": "={{ $env.VK_CALLBACK_SECRET }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000005",
+      "name": "Secret Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        20,
+        120
+      ],
+      "notes": "The webhook URL is public. The shared secret is the only thing that makes a request trustworthy."
+    },
+    {
+      "parameters": {},
+      "id": "d1000000-0000-4000-8000-000000000006",
+      "name": "Drop — Bad Secret",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        240,
+        280
+      ],
+      "notes": "VK already got its 'ok'. An attacker learns nothing from the response."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c0000000-0000-4000-8000-000000000003",
+              "leftValue": "={{ $json.body.type }}",
+              "rightValue": "message_new",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000007",
+      "name": "Is New Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * VK Callback API → shared channel envelope.\n *\n * The envelope is deliberately identical in shape to the Telegram one, so the\n * agent and its tools never learn which channel they are on. Adding Avito or\n * MAX later means writing another normalizer, not touching any build.\n *\n * This file is the single source of truth. It is injected verbatim into the\n * Code node of every VK workflow by sync-code-node.py — never hand-edit the\n * copy inside a workflow.json.\n */\n\n/** VK photo size types, worst to best. Used only as a tiebreak when width is absent. */\nconst SIZE_RANK = ['s', 'm', 'o', 'p', 'q', 'r', 'x', 'y', 'z', 'w'];\n\n/** Image extensions we are willing to send to OCR. A .pdf doc is not one. */\nconst IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'heic', 'webp', 'bmp']);\n\n/**\n * Pick the largest available rendition of a VK photo.\n * VK does not guarantee `sizes` is ordered, and older payloads omit `width`.\n */\nfunction largestPhotoUrl(photo) {\n  const sizes = Array.isArray(photo && photo.sizes) ? photo.sizes : [];\n  if (sizes.length === 0) return '';\n\n  let best = null;\n  for (const s of sizes) {\n    if (!s || !s.url) continue;\n    if (best === null) { best = s; continue; }\n\n    const byWidth = (s.width || 0) - (best.width || 0);\n    if (byWidth > 0) { best = s; continue; }\n    if (byWidth === 0 && SIZE_RANK.indexOf(s.type) > SIZE_RANK.indexOf(best.type)) best = s;\n  }\n  return best ? best.url : '';\n}\n\n/** Lowercase extension of a VK doc, '' when absent. */\nfunction docExt(doc) {\n  if (doc && typeof doc.ext === 'string' && doc.ext) return doc.ext.toLowerCase();\n  const title = (doc && doc.title) || '';\n  const dot = title.lastIndexOf('.');\n  return dot === -1 ? '' : title.slice(dot + 1).toLowerCase();\n}\n\n/**\n * Find the first attachment we know how to handle.\n * Order matters: a photo is a better OCR input than a doc of the same receipt,\n * and users regularly send both.\n */\nfunction extractAttachment(attachments) {\n  const list = Array.isArray(attachments) ? attachments : [];\n  const none = { file_url: '', file_kind: '', audio_url: '' };\n\n  const photo = list.find((a) => a && a.type === 'photo' && a.photo);\n  if (photo) {\n    const url = largestPhotoUrl(photo.photo);\n    if (url) return { file_url: url, file_kind: 'photo', audio_url: '' };\n  }\n\n  const doc = list.find((a) => a && a.type === 'doc' && a.doc && a.doc.url);\n  if (doc) {\n    const ext = docExt(doc.doc);\n    // A non-image doc still gets reported, so the caller can route it to manual\n    // review with an honest reason instead of failing inside OCR.\n    return {\n      file_url: doc.doc.url,\n      file_kind: IMAGE_EXTS.has(ext) ? 'doc' : 'doc_unsupported',\n      audio_url: '',\n    };\n  }\n\n  const voice = list.find((a) => a && a.type === 'audio_message' && a.audio_message);\n  if (voice) {\n    const am = voice.audio_message;\n    const url = am.link_ogg || am.link_mp3 || '';\n    if (url) return { file_url: '', file_kind: 'audio_message', audio_url: url };\n  }\n\n  return none;\n}\n\n/**\n * A stable non-zero 31-bit integer derived from a string.\n *\n * VK requires `random_id` on messages.send to be non-zero, and dedups sends\n * that repeat one. Deriving it from the event id rather than from the clock\n * means an n8n retry of the same event cannot produce a second reply.\n */\nfunction replyRandomId(seed) {\n  let h = 7;\n  const s = String(seed || '');\n  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;\n  return (h >>> 0) % 2147483647 || 1; // never 0 — VK rejects it\n}\n\n/**\n * @param {object} body - the raw parsed JSON body of a VK Callback POST\n * @returns {object} the shared envelope\n */\nfunction normalizeVkEvent(body) {\n  const b = body || {};\n  const msg = (b.object && b.object.message) || {};\n  const att = extractAttachment(msg.attachments);\n\n  const fromId = msg.from_id === undefined || msg.from_id === null ? '' : String(msg.from_id);\n  const peerId = msg.peer_id === undefined || msg.peer_id === null ? '' : String(msg.peer_id);\n\n  // VK's event_id is stable across its own retries; message id is not a safe\n  // dedup key because a retry of the *same* delivery carries the same message.\n  // Fall back to a composite only when VK omits event_id (it does for some\n  // older community settings).\n  const eventId = b.event_id ? String(b.event_id) : `${b.group_id || 'g'}:${msg.id || 'm'}:${msg.date || '0'}`;\n\n  return {\n    channel: 'vk',\n    event_id: eventId,\n    group_id: b.group_id === undefined ? '' : String(b.group_id),\n    user_id: fromId,\n    chat_id: peerId,\n    session_key: `vk:${fromId || 'unknown'}`,\n    text: typeof msg.text === 'string' ? msg.text : '',\n    file_url: att.file_url,\n    file_kind: att.file_kind,\n    audio_url: att.audio_url,\n    message_id: msg.id === undefined || msg.id === null ? '' : String(msg.id),\n    ts: msg.date ? new Date(msg.date * 1000).toISOString() : new Date().toISOString(),\n    reply_random_id: replyRandomId(eventId),\n  };\n}\n\n// ---------------------------------------------------------------------------\n// n8n glue. Everything above is builds/vk-adapter/normalize-vk.js, injected by\n// sync-code-node.py. Do not edit it here — edit the source and re-run the sync.\n// ---------------------------------------------------------------------------\nreturn $input.all().map((item) => ({\n  json: normalizeVkEvent(item.json.body !== undefined ? item.json.body : item.json),\n}));\n"
+      },
+      "id": "d1000000-0000-4000-8000-000000000008",
+      "name": "Normalize VK Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        0
+      ],
+      "notes": "Generated from builds/vk-adapter/normalize-vk.js by sync-code-node.py. Do not edit here."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.vk.com/method/messages.send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "peer_id",
+              "value": "={{ $json.chat_id }}"
+            },
+            {
+              "name": "random_id",
+              "value": "={{ $json.reply_random_id }}"
+            },
+            {
+              "name": "message",
+              "value": "=Получено: {{ $json.text || ($json.file_kind ? '[' + $json.file_kind + ']' : '(пусто)') }}"
+            },
+            {
+              "name": "v",
+              "value": "5.199"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-000000000009",
+      "name": "Send Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        0
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "VK Group Token"
+        }
+      },
+      "notes": "Query Auth credential supplies access_token, so the token never enters this file."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c0000000-0000-4000-8000-000000000004",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d1000000-0000-4000-8000-00000000000a",
+      "name": "VK Returned An Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        0
+      ],
+      "notes": "VK answers 200 OK with an {\"error\": {...}} body on failure, so HTTP status alone never catches it."
+    },
+    {
+      "parameters": {
+        "errorMessage": "=VK API error {{ $json.error.error_code }}: {{ $json.error.error_msg }}"
+      },
+      "id": "d1000000-0000-4000-8000-00000000000b",
+      "name": "Raise VK Error",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        -100
+      ],
+      "notes": "Surfaces as a failed execution so the Error Trigger workflow can alert."
+    },
+    {
+      "parameters": {},
+      "id": "d1000000-0000-4000-8000-00000000000c",
+      "name": "Sent",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "VK Webhook": {
+      "main": [
+        [
+          {
+            "node": "Is Confirmation?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Confirmation?": {
+      "main": [
+        [
+          {
+            "node": "Respond Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond OK": {
+      "main": [
+        [
+          {
+            "node": "Secret Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Secret Valid?": {
+      "main": [
+        [
+          {
+            "node": "Is New Message?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Drop — Bad Secret",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is New Message?": {
+      "main": [
+        [
+          {
+            "node": "Normalize VK Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Normalize VK Event": {
+      "main": [
+        [
+          {
+            "node": "Send Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reply": {
+      "main": [
+        [
+          {
+            "node": "VK Returned An Error?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VK Returned An Error?": {
+      "main": [
+        [
+          {
+            "node": "Raise VK Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
