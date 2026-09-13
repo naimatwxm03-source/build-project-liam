@@ -1,5 +1,5 @@
 {
-  "name": "01 Expense Bot — Step 1 (Echo)",
+  "name": "01 Expense Bot — VK",
   "active": false,
   "settings": {
     "executionOrder": "v1"
@@ -7,134 +7,1159 @@
   "nodes": [
     {
       "parameters": {
-        "updates": [
-          "message"
-        ],
-        "additionalFields": {}
+        "httpMethod": "POST",
+        "path": "vk-receipt",
+        "responseMode": "responseNode",
+        "options": {}
       },
-      "id": "a1f0c3d2-1e4b-4a90-9c11-0b7d5e2a1001",
-      "name": "Telegram Trigger",
-      "type": "n8n-nodes-base.telegramTrigger",
-      "typeVersion": 1.2,
+      "id": "e1000000-0000-4000-8000-000000000001",
+      "name": "VK Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "position": [
-        -220,
+        -1100,
         0
       ],
-      "webhookId": "3f9c8e17-25a4-4d6b-b0f2-7a1c9e4d5b60",
-      "credentials": {
-        "telegramApi": {
-          "id": "REPLACE_ON_IMPORT",
-          "name": "Telegram account"
+      "webhookId": "9b3e1f42-77c0-4d18-9a55-3e6b2c4a1f90",
+      "notes": "responseMode MUST be responseNode, or VK never confirms the address."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000002",
+              "leftValue": "={{ $json.body.type }}",
+              "rightValue": "confirmation",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000003",
+      "name": "Is Confirmation?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -900,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $env.VK_CONFIRMATION_STRING }}",
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000004",
+      "name": "Respond Confirmation",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -700,
+        -160
+      ],
+      "notes": "Bare plain text. Needs N8N_BLOCK_ENV_ACCESS_IN_NODE=false."
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "ok",
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000005",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -700,
+        120
+      ],
+      "notes": "Answer FIRST, think after. VK retries a slow endpoint; a retry would log the receipt twice."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000006",
+              "leftValue": "={{ $json.body.secret }}",
+              "rightValue": "={{ $env.VK_CALLBACK_SECRET }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000007",
+      "name": "Secret Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -500,
+        120
+      ],
+      "notes": "The URL is public. The shared secret is what makes a request trustworthy."
+    },
+    {
+      "parameters": {},
+      "id": "e1000000-0000-4000-8000-000000000008",
+      "name": "Drop — Bad Secret",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -300,
+        320
+      ],
+      "notes": "VK already got its 'ok'. An attacker learns nothing."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000009",
+              "leftValue": "={{ $json.body.type }}",
+              "rightValue": "message_new",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000010",
+      "name": "Is New Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -300,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * VK Callback API → shared channel envelope.\n *\n * The envelope is deliberately identical in shape to the Telegram one, so the\n * agent and its tools never learn which channel they are on. Adding Avito or\n * MAX later means writing another normalizer, not touching any build.\n *\n * This file is the single source of truth. It is injected verbatim into the\n * Code node of every VK workflow by sync-code-node.py — never hand-edit the\n * copy inside a workflow.json.\n */\n\n/** VK photo size types, worst to best. Used only as a tiebreak when width is absent. */\nconst SIZE_RANK = ['s', 'm', 'o', 'p', 'q', 'r', 'x', 'y', 'z', 'w'];\n\n/** Image extensions we are willing to send to OCR. A .pdf doc is not one. */\nconst IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'heic', 'webp', 'bmp']);\n\n/**\n * Pick the largest available rendition of a VK photo.\n * VK does not guarantee `sizes` is ordered, and older payloads omit `width`.\n */\nfunction largestPhotoUrl(photo) {\n  const sizes = Array.isArray(photo && photo.sizes) ? photo.sizes : [];\n  if (sizes.length === 0) return '';\n\n  let best = null;\n  for (const s of sizes) {\n    if (!s || !s.url) continue;\n    if (best === null) { best = s; continue; }\n\n    const byWidth = (s.width || 0) - (best.width || 0);\n    if (byWidth > 0) { best = s; continue; }\n    if (byWidth === 0 && SIZE_RANK.indexOf(s.type) > SIZE_RANK.indexOf(best.type)) best = s;\n  }\n  return best ? best.url : '';\n}\n\n/** Lowercase extension of a VK doc, '' when absent. */\nfunction docExt(doc) {\n  if (doc && typeof doc.ext === 'string' && doc.ext) return doc.ext.toLowerCase();\n  const title = (doc && doc.title) || '';\n  const dot = title.lastIndexOf('.');\n  return dot === -1 ? '' : title.slice(dot + 1).toLowerCase();\n}\n\n/**\n * Find the first attachment we know how to handle.\n * Order matters: a photo is a better OCR input than a doc of the same receipt,\n * and users regularly send both.\n */\nfunction extractAttachment(attachments) {\n  const list = Array.isArray(attachments) ? attachments : [];\n  const none = { file_url: '', file_kind: '', audio_url: '' };\n\n  const photo = list.find((a) => a && a.type === 'photo' && a.photo);\n  if (photo) {\n    const url = largestPhotoUrl(photo.photo);\n    if (url) return { file_url: url, file_kind: 'photo', audio_url: '' };\n  }\n\n  const doc = list.find((a) => a && a.type === 'doc' && a.doc && a.doc.url);\n  if (doc) {\n    const ext = docExt(doc.doc);\n    // A non-image doc still gets reported, so the caller can route it to manual\n    // review with an honest reason instead of failing inside OCR.\n    return {\n      file_url: doc.doc.url,\n      file_kind: IMAGE_EXTS.has(ext) ? 'doc' : 'doc_unsupported',\n      audio_url: '',\n    };\n  }\n\n  const voice = list.find((a) => a && a.type === 'audio_message' && a.audio_message);\n  if (voice) {\n    const am = voice.audio_message;\n    const url = am.link_ogg || am.link_mp3 || '';\n    if (url) return { file_url: '', file_kind: 'audio_message', audio_url: url };\n  }\n\n  return none;\n}\n\n/**\n * A stable non-zero 31-bit integer derived from a string.\n *\n * VK requires `random_id` on messages.send to be non-zero, and dedups sends\n * that repeat one. Deriving it from the event id rather than from the clock\n * means an n8n retry of the same event cannot produce a second reply.\n */\nfunction replyRandomId(seed) {\n  let h = 7;\n  const s = String(seed || '');\n  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;\n  return (h >>> 0) % 2147483647 || 1; // never 0 — VK rejects it\n}\n\n/**\n * @param {object} body - the raw parsed JSON body of a VK Callback POST\n * @returns {object} the shared envelope\n */\nfunction normalizeVkEvent(body) {\n  const b = body || {};\n  const msg = (b.object && b.object.message) || {};\n  const att = extractAttachment(msg.attachments);\n\n  const fromId = msg.from_id === undefined || msg.from_id === null ? '' : String(msg.from_id);\n  const peerId = msg.peer_id === undefined || msg.peer_id === null ? '' : String(msg.peer_id);\n\n  // VK's event_id is stable across its own retries; message id is not a safe\n  // dedup key because a retry of the *same* delivery carries the same message.\n  // Fall back to a composite only when VK omits event_id (it does for some\n  // older community settings).\n  const eventId = b.event_id ? String(b.event_id) : `${b.group_id || 'g'}:${msg.id || 'm'}:${msg.date || '0'}`;\n\n  return {\n    channel: 'vk',\n    event_id: eventId,\n    group_id: b.group_id === undefined ? '' : String(b.group_id),\n    user_id: fromId,\n    chat_id: peerId,\n    session_key: `vk:${fromId || 'unknown'}`,\n    text: typeof msg.text === 'string' ? msg.text : '',\n    file_url: att.file_url,\n    file_kind: att.file_kind,\n    audio_url: att.audio_url,\n    message_id: msg.id === undefined || msg.id === null ? '' : String(msg.id),\n    ts: msg.date ? new Date(msg.date * 1000).toISOString() : new Date().toISOString(),\n    reply_random_id: replyRandomId(eventId),\n  };\n}\n\n// ---------------------------------------------------------------------------\n// n8n glue. Everything above is injected by sync-code-node.py from the source\n// named below. Do not edit it here — edit the source and re-run the sync.\n//   source: builds/vk-adapter/normalize-vk.js\n// ---------------------------------------------------------------------------\nreturn $input.all().map((item) => ({\n  json: normalizeVkEvent(item.json.body !== undefined ? item.json.body : item.json),\n}));\n"
+      },
+      "id": "e1000000-0000-4000-8000-000000000011",
+      "name": "Normalize VK Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        120
+      ],
+      "notes": "Generated from builds/vk-adapter/normalize-vk.js. Do not edit here."
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "DvHopFFV1RYVRVva",
+          "mode": "id"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "event_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.event_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000012",
+      "name": "Seen Before?",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        100,
+        120
+      ],
+      "alwaysOutputData": true,
+      "notes": "No Redis on this box, so the dedup ledger is a Data Table. Data Tables have no unique constraint — this is check-then-insert. At this volume the race is unreachable; swapping in Redis later is a one-node change."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000013",
+              "leftValue": "={{ $json.event_id }}",
+              "rightValue": "={{ $('Normalize VK Event').item.json.event_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000014",
+      "name": "Already Processed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        300,
+        120
+      ],
+      "notes": "VK retries deliveries. Without this, one photo becomes several expense rows."
+    },
+    {
+      "parameters": {},
+      "id": "e1000000-0000-4000-8000-000000000015",
+      "name": "Drop — Duplicate",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        500,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "DvHopFFV1RYVRVva",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "event_id": "={{ $('Normalize VK Event').item.json.event_id }}",
+            "channel": "={{ $('Normalize VK Event').item.json.channel }}",
+            "processed_at": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000016",
+      "name": "Mark Seen",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        500,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000017",
+              "leftValue": "={{ $('Normalize VK Event').item.json.file_kind }}",
+              "rightValue": "photo",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "e1000000-0000-4000-8000-000000000018",
+              "leftValue": "={{ $('Normalize VK Event').item.json.file_kind }}",
+              "rightValue": "doc",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000019",
+      "name": "Has Image?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        700,
+        120
+      ],
+      "notes": "doc_unsupported (a PDF) deliberately fails this and goes to the text branch, which explains itself rather than crashing OCR."
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Normalize VK Event').item.json.file_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
         }
-      }
+      },
+      "id": "e1000000-0000-4000-8000-000000000020",
+      "name": "Download Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        0
+      ],
+      "notes": "VK serves the photo URL directly in the payload — no getFile round-trip, and no 1-hour expiry as with Telegram."
+    },
+    {
+      "parameters": {
+        "operation": "binaryToPropery",
+        "binaryPropertyName": "data",
+        "destinationKey": "image_b64",
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000021",
+      "name": "Image To Base64",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        0
+      ],
+      "notes": "Yandex Vision takes base64 in the JSON body, not a multipart upload."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vision.api.cloud.yandex.net/vision/v1/batchAnalyze",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ folderId: $env.YANDEX_CLOUD_FOLDER_ID || 'b1gg2h3lj0e41o47fkoo', analyze_specs: [{ content: $json.image_b64, features: [{ type: 'TEXT_DETECTION', text_detection_config: { language_codes: ['ru','en'] } }] }] }) }}",
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000022",
+      "name": "Yandex Vision OCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Yandex Api-Key"
+        }
+      },
+      "notes": "Header Auth credential: Name='Authorization', Value='Api-Key <your key>'. Api-Key, NOT Bearer. Endpoint verified working against real receipts on 2026-09-03."
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Yandex Vision OCR response → flat text for the extraction model.\n *\n * Verified against the real responses in ocr-results/, captured from Russian\n * thermal receipts on 2026-09-03.\n *\n * The shape is deeper than it looks and has one trap: `lines` carry NO `text`\n * field. Only `words[].text` exists, so a line must be rebuilt by joining its\n * words. Reading `line.text` yields `undefined` for every line and produces an\n * empty prompt with no error anywhere.\n *\n *   results[].results[].textDetection.pages[].blocks[].lines[].words[].text\n *\n * Portable to an n8n Code node as-is — no imports, no Node built-ins.\n */\n\n'use strict';\n\n/** Words below this confidence are kept but marked, so the model can discount them. */\nconst LOW_CONFIDENCE = 0.6;\n\nfunction asArray(v) {\n  return Array.isArray(v) ? v : [];\n}\n\n/**\n * Rebuild one line's text from its words.\n * Vision returns words in reading order, so a plain join is correct; sorting by\n * boundingBox would reorder correctly-ordered output on skewed thermal paper.\n */\nfunction lineText(line) {\n  return asArray(line && line.words)\n    .map((w) => (w && typeof w.text === 'string' ? w.text : ''))\n    .filter(Boolean)\n    .join(' ')\n    .trim();\n}\n\n/** Mean word confidence for a line, 0 when the line has no scored words. */\nfunction lineConfidence(line) {\n  const scores = asArray(line && line.words)\n    .map((w) => (w && typeof w.confidence === 'number' ? w.confidence : null))\n    .filter((c) => c !== null);\n  if (scores.length === 0) return 0;\n  return scores.reduce((a, b) => a + b, 0) / scores.length;\n}\n\n/**\n * @param {object} response - raw Vision batchAnalyze JSON\n * @returns {{text: string, lines: Array<{text: string, confidence: number}>, pages: number, lowConfidenceLines: number}}\n */\nfunction ocrToText(response) {\n  const lines = [];\n\n  for (const outer of asArray(response && response.results)) {\n    for (const inner of asArray(outer && outer.results)) {\n      const pages = asArray(inner && inner.textDetection && inner.textDetection.pages);\n      for (const page of pages) {\n        for (const block of asArray(page && page.blocks)) {\n          for (const line of asArray(block && block.lines)) {\n            const text = lineText(line);\n            if (!text) continue;\n            lines.push({ text, confidence: lineConfidence(line) });\n          }\n        }\n      }\n    }\n  }\n\n  return {\n    text: lines.map((l) => l.text).join('\\n'),\n    lines,\n    pages: countPages(response),\n    lowConfidenceLines: lines.filter((l) => l.confidence < LOW_CONFIDENCE).length,\n  };\n}\n\nfunction countPages(response) {\n  let n = 0;\n  for (const outer of asArray(response && response.results)) {\n    for (const inner of asArray(outer && outer.results)) {\n      n += asArray(inner && inner.textDetection && inner.textDetection.pages).length;\n    }\n  }\n  return n;\n}\n\n/**\n * Did OCR produce enough to be worth sending to a model?\n *\n * A blurred or dark photo comes back as a handful of junk lines, not as an\n * error. Routing that to the model wastes tokens and invites a hallucinated\n * receipt. Below this bar the message goes to manual review with an honest\n * reason — never to an automated rejection.\n */\nfunction isUsable(result) {\n  if (!result || !result.text) return { ok: false, reason: 'OCR вернул пустой текст' };\n  if (result.lines.length < 3) {\n    return { ok: false, reason: `OCR распознал только ${result.lines.length} строк(и)` };\n  }\n  if (!/\\d/.test(result.text)) {\n    return { ok: false, reason: 'В распознанном тексте нет ни одной цифры' };\n  }\n  return { ok: true };\n}\n\n// ---------------------------------------------------------------------------\n//   source: builds/01-receipt-bot/ocr-text.js\n// ---------------------------------------------------------------------------\nconst envelope = $('Normalize VK Event').first().json;\n\nreturn $input.all().map((item) => {\n  const flat = ocrToText(item.json);\n  const usable = isUsable(flat);\n  return {\n    json: {\n      ...envelope,\n      receipt_text: flat.text,\n      ocr_lines: flat.lines.length,\n      ocr_low_confidence_lines: flat.lowConfidenceLines,\n      ocr_usable: usable.ok,\n      ocr_reason: usable.ok ? '' : usable.reason,\n    },\n  };\n});\n"
+      },
+      "id": "e1000000-0000-4000-8000-000000000023",
+      "name": "OCR To Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        0
+      ],
+      "notes": "Generated from builds/01-receipt-bot/ocr-text.js. Vision's lines carry NO text field — only words[].text — so lines must be rebuilt by joining words."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000024",
+              "leftValue": "={{ $json.ocr_usable }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000025",
+      "name": "OCR Usable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1700,
+        0
+      ],
+      "notes": "A blurred photo returns junk, not an error. Below the bar it goes to review rather than inviting a hallucinated receipt."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.receipt_text }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Ты — парсер российских кассовых чеков. На входе — распознанный текст чека, строки могут идти не по порядку.\n\nВерни ТОЛЬКО JSON, без пояснений и без markdown-блока:\n{\"vendor\":\"\",\"expense_date\":\"ДД.ММ.ГГГГ\",\"total\":\"\",\"currency\":\"RUB\",\"category\":\"\",\"confidence\":0.0,\"multiple_receipts\":false,\"raw_text\":\"\"}\n\nПравила:\n- total — ИТОГОВАЯ сумма покупки. Не бери суммы из строк СВЕРКА ИТОГОВ, ЧЕКОВ ВОЗВРАТА, ВНЕСЕНИЙ, ВЫПЛАТ, КОМИССИЯ — это не расход.\n- Передавай сумму и дату КАК НАПЕЧАТАНО в чеке, включая апострофы и знак '='. Не исправляй символы сам — этим занимается отдельный проверяющий слой.\n- Если в тексте несколько разных чеков (несколько блоков TID/RRN/СУММА) — поставь multiple_receipts=true и не выбирай один из них.\n- category: еда, такси, транспорт, топливо, связь, канцтовары, аренда, реклама, прочее.\n- confidence 0.0-1.0 — насколько ты уверен в vendor, дате и сумме.\n- Ничего не выдумывай. Неизвестное поле оставь пустой строкой."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000026",
+      "name": "Extract Fields",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        1900,
+        -120
+      ],
+      "notes": "Extraction only. The model never decides whether a value is valid — Validate Receipt does that deterministically."
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt://b1gg2h3lj0e41o47fkoo/qwen3-235b-a22b-fp8/latest"
+        },
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "e1000000-0000-4000-8000-000000000027",
+      "name": "Qwen 3 (Yandex AI Studio)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1900,
+        80
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Yandex AI Studio"
+        }
+      },
+      "notes": "OpenAI credential with Base URL https://llm.api.cloud.yandex.net/v1 and the Yandex API key. temperature 0 — extraction, not writing."
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * OCR lookalike repair for Russian thermal-print receipts.\n *\n * Yandex Vision confuses Cyrillic letters with digits in receipt fonts.\n * Observed on real slips from ООО «Рафаэль» (Samara, 25.08.2026):\n *   \"З'980.00 РУБ\"   -> digit 3 read as Cyrillic З\n *   \"ООО РАФАЗЛЬ\"    -> Э read as З (text — must NOT be \"repaired\")\n *\n * DESIGN RULE: repair is applied ONLY to typed numeric fields (amount, date,\n * ИНН, card mask, terminal/auth ids). Free text — vendor names, addresses,\n * cashier names — goes through normalizeText(), which never touches\n * characters. This is what keeps ЗАО from becoming 3АО and ООО from becoming 000.\n *\n * Three guards, each sufficient on its own:\n *   1. Field typing — text fields never reach the repair path at all.\n *   2. Already-valid tokens are returned untouched. Repair only ever runs on\n *      a token that FAILED its pattern, so a value that already parses can\n *      never be silently altered.\n *   3. A token with no real ASCII digit is refused outright. \"ЗАО\" and \"ООО\"\n *      have none, so they can never be coerced into \"3АО\" / \"000\".\n *\n * Anything that cannot be repaired into a valid value returns a review record\n * ({ ok: false, reason }) — never a zero, never a silent drop, never an\n * automated rejection.\n *\n * Portable to an n8n Code node as-is (no imports, no Node built-ins).\n */\n\n'use strict';\n\n/**\n * Cyrillic/Latin glyphs → digits. Deliberately conservative: every entry here\n * is a substitution actually seen in RU thermal-receipt OCR. Adding speculative\n * pairs widens the chance of \"repairing\" a genuinely different value into a\n * plausible-but-wrong one, which is worse than a clean parse failure.\n */\nconst DIGIT_LOOKALIKES = {\n  З: '3', з: '3', Э: '3',\n  О: '0', о: '0', O: '0', o: '0',\n  І: '1', I: '1', l: '1', '|': '1',\n  Ч: '4',\n  б: '6', Б: '6',\n  S: '5', s: '5',\n};\n\nconst AMOUNT_RE = /^\\d{1,3}(?:['’  ]\\d{3})*[.,]\\d{2}$|^\\d+[.,]\\d{2}$/;\nconst DATE_RE = /^(\\d{2})\\.(\\d{2})\\.(\\d{2}|\\d{4})$/;\nconst INN_RE = /^\\d{10}$|^\\d{12}$/;\nconst CARD_MASK_RE = /^\\*{2,6}\\d{4}$/;\nconst ID_RE = /^\\d{4,20}$/;\n\n/** Map lookalike glyphs to digits. Internal — never call this on free text. */\nfunction mapGlyphs(token) {\n  let out = '';\n  for (const ch of token) out += DIGIT_LOOKALIKES[ch] || ch;\n  return out;\n}\n\n/**\n * Core repair primitive. Returns the token if it already matches, else attempts\n * a single glyph-mapped repair, else null (caller routes to manual review).\n */\nfunction repairToken(raw, pattern) {\n  if (typeof raw !== 'string') return null;\n  const token = raw.trim();\n  if (!token) return null;\n\n  // Guard 2: already valid — return untouched, never \"repair\" a good value.\n  if (pattern.test(token)) return { value: token, repaired: false };\n\n  // Guard 3: no real digit anywhere means this is not a numeric token.\n  // Kills \"ЗАО\", \"ООО\", \"ЗЗЗ\" before any substitution can happen.\n  if (!/[0-9]/.test(token)) return null;\n\n  const candidate = mapGlyphs(token);\n  if (candidate === token) return null; // nothing to repair; genuinely malformed\n  if (pattern.test(candidate)) return { value: candidate, repaired: true };\n\n  return null;\n}\n\nfunction review(field, raw, reason) {\n  return { ok: false, field, raw, reason };\n}\n\n/** Free text — vendor, address, cashier. NO character substitution, ever. */\nfunction normalizeText(raw) {\n  if (typeof raw !== 'string') return '';\n  return raw.replace(/\\s+/g, ' ').trim();\n}\n\n/**\n * Strip receipt decoration from around an amount, before any repair runs.\n *\n * Real slips (ООО «Рафаэль», 25.08.2026) print totals as \"=10480.00\" and\n * \"67'376.00 РУБ\", never as a bare number. The patterns are anchored, so the\n * decoration alone is enough to fail every real total.\n *\n * ORDER MATTERS: this must run BEFORE glyph repair. \"РУБ\" glyph-maps to \"РУ6\",\n * which would turn a strippable suffix into permanent garbage.\n *\n * Only a leading \"=\" and a trailing currency word are removed. Nothing else —\n * a looser strip would let genuinely malformed values through as plausible\n * numbers, which is worse than a clean parse failure.\n */\nfunction stripAmountNoise(raw) {\n  if (typeof raw !== 'string') return raw;\n  return raw\n    .trim()\n    .replace(/^[=＝]+\\s*/, '')\n    .replace(/\\s*(?:РУБ(?:ЛЕЙ)?\\.?|RUB|руб\\.?|₽)\\s*$/iu, '')\n    .trim();\n}\n\n/** \"З'980.00 РУБ\" -> 3980.00 (repaired). \"=10480.00\" -> 10480.00 (clean). */\nfunction parseAmount(raw) {\n  const r = repairToken(stripAmountNoise(raw), AMOUNT_RE);\n  if (!r) return review('amount', raw, 'unparseable_amount');\n  const numeric = r.value.replace(/['’  ]/g, '').replace(',', '.');\n  const value = Number(numeric);\n  if (!Number.isFinite(value)) return review('amount', raw, 'non_finite_amount');\n  return { ok: true, field: 'amount', value, repaired: r.repaired, raw };\n}\n\n/** \"25.08.2026\" / \"25.08.26\" -> ISO date, with real calendar validation. */\nfunction parseDate(raw, { pivot = 70 } = {}) {\n  const r = repairToken(raw, DATE_RE);\n  if (!r) return review('date', raw, 'unparseable_date');\n\n  const m = r.value.match(DATE_RE);\n  const day = Number(m[1]);\n  const month = Number(m[2]);\n  let year = Number(m[3]);\n  if (m[3].length === 2) year += year <= pivot ? 2000 : 1900;\n\n  const d = new Date(Date.UTC(year, month - 1, day));\n  if (\n    d.getUTCFullYear() !== year ||\n    d.getUTCMonth() !== month - 1 ||\n    d.getUTCDate() !== day\n  ) {\n    return review('date', raw, 'invalid_calendar_date');\n  }\n\n  return {\n    ok: true,\n    field: 'date',\n    value: d.toISOString().slice(0, 10),\n    repaired: r.repaired,\n    raw,\n  };\n}\n\n/** Official ФНС control-digit algorithm for 10- and 12-digit ИНН. */\nfunction innChecksumValid(inn) {\n  const d = inn.split('').map(Number);\n  const check = (coeffs, upTo) => {\n    let sum = 0;\n    for (let i = 0; i < coeffs.length; i++) sum += coeffs[i] * d[i];\n    return (sum % 11) % 10 === d[upTo];\n  };\n  if (inn.length === 10) {\n    return check([2, 4, 10, 3, 5, 9, 4, 6, 8], 9);\n  }\n  return (\n    check([7, 2, 4, 10, 3, 5, 9, 4, 6, 8], 10) &&\n    check([3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8], 11)\n  );\n}\n\n/** ИНН — repaired, then checksum-validated. A bad checksum goes to review. */\nfunction parseInn(raw) {\n  const r = repairToken(raw, INN_RE);\n  if (!r) return review('inn', raw, 'unparseable_inn');\n  if (!innChecksumValid(r.value)) return review('inn', raw, 'inn_checksum_failed');\n  return { ok: true, field: 'inn', value: r.value, repaired: r.repaired, raw };\n}\n\n/** \"****5353\" -> last 4 digits. Never returns a full PAN. */\n/**\n * Terminals print a single trailing status letter after the mask (\"****5353 W\").\n * Only one trailing letter, separated by space, is removed — anything more\n * permissive would swallow real data.\n */\nfunction stripCardNoise(raw) {\n  if (typeof raw !== 'string') return raw;\n  return raw.trim().replace(/\\s+[A-ZА-Я]$/iu, '').trim();\n}\n\nfunction parseCardMask(raw) {\n  const r = repairToken(stripCardNoise(raw), CARD_MASK_RE);\n  if (!r) return review('card_mask', raw, 'unparseable_card_mask');\n  return {\n    ok: true,\n    field: 'card_mask',\n    value: r.value.slice(-4),\n    repaired: r.repaired,\n    raw,\n  };\n}\n\n/** TID / MID / RRN / КОД.АВТ — plain digit ids. */\nfunction parseId(raw, field = 'id') {\n  const r = repairToken(raw, ID_RE);\n  if (!r) return review(field, raw, 'unparseable_id');\n  return { ok: true, field, value: r.value, repaired: r.repaired, raw };\n}\n\n/**\n * Parse a whole extracted receipt. `fields` is the field-typed output of your\n * extraction step — the typing is what routes each value to the right parser\n * and keeps text away from the repair path entirely.\n *\n * Returns { ok, data, repairs, review } — `review` non-empty means a human\n * looks at it before anything is written to the CRM.\n */\nfunction parseReceipt(fields) {\n  const PARSERS = {\n    amount: parseAmount,\n    date: parseDate,\n    inn: parseInn,\n    card_mask: parseCardMask,\n    tid: (v) => parseId(v, 'tid'),\n    mid: (v) => parseId(v, 'mid'),\n    rrn: (v) => parseId(v, 'rrn'),\n    auth_code: (v) => parseId(v, 'auth_code'),\n  };\n  const TEXT_FIELDS = new Set(['vendor', 'address', 'cashier', 'raw_text']);\n\n  const data = {};\n  const repairs = [];\n  const needsReview = [];\n\n  for (const [key, raw] of Object.entries(fields || {})) {\n    if (TEXT_FIELDS.has(key)) {\n      data[key] = normalizeText(raw); // never character-substituted\n      continue;\n    }\n    const parser = PARSERS[key];\n    if (!parser) {\n      data[key] = raw; // unknown field — pass through untouched\n      continue;\n    }\n    const result = parser(raw);\n    if (result.ok) {\n      data[key] = result.value;\n      if (result.repaired) repairs.push({ field: key, raw, value: result.value });\n    } else {\n      data[key] = null;\n      needsReview.push(result);\n    }\n  }\n\n  return { ok: needsReview.length === 0, data, repairs, review: needsReview };\n}\n\n// ---------------------------------------------------------------------------\n//   source: builds/01-receipt-bot/normalize.js\n//\n// The model extracts; this validates. Anything that fails its pattern becomes a\n// review record with a stated reason — never a zero, never a silent drop, never\n// an automated rejection.\n// ---------------------------------------------------------------------------\nconst envelope = $('Normalize VK Event').first().json;\n\n/** The model is asked for JSON but can still wrap it in prose or a fence. */\nfunction parseModelJson(raw) {\n  if (raw && typeof raw === 'object') return raw;\n  const text = String(raw == null ? '' : raw);\n  const fenced = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\n  const candidate = fenced ? fenced[1] : text;\n  const start = candidate.indexOf('{');\n  const end = candidate.lastIndexOf('}');\n  if (start === -1 || end === -1 || end <= start) return null;\n  try {\n    return JSON.parse(candidate.slice(start, end + 1));\n  } catch (e) {\n    return null;\n  }\n}\n\nreturn $input.all().map((item) => {\n  const src = item.json;\n  const extracted = parseModelJson(src.text !== undefined ? src.text : src);\n\n  if (!extracted) {\n    return { json: {\n      ...envelope,\n      needs_review: true,\n      review_reason: 'Модель вернула не-JSON — проверьте вручную',\n      vendor: '', expense_date: null, total: null, currency: 'RUB',\n      category: 'прочее', confidence: 0,\n      raw_text: String(src.text == null ? '' : src.text).slice(0, 2000),\n    }};\n  }\n\n  // Several slips in one photo is a real case (seen in the test corpus). Never\n  // silently log one of them as \"the\" expense.\n  if (extracted.multiple_receipts === true) {\n    return { json: {\n      ...envelope,\n      needs_review: true,\n      review_reason: 'На фото несколько чеков — отправьте по одному',\n      vendor: '', expense_date: null, total: null, currency: 'RUB',\n      category: 'прочее', confidence: 0,\n      raw_text: (extracted.raw_text || '').slice(0, 2000),\n    }};\n  }\n\n  const checked = parseReceipt({\n    vendor: extracted.vendor || '',\n    amount: extracted.total == null ? '' : String(extracted.total),\n    date: extracted.expense_date || '',\n  });\n\n  const reasons = checked.review.map((r) => `${r.field}: ${r.reason}`);\n  const confidence = Number(extracted.confidence);\n\n  return { json: {\n    ...envelope,\n    vendor: checked.data.vendor || '',\n    expense_date: checked.data.date || null,\n    total: checked.data.amount == null ? null : checked.data.amount,\n    currency: extracted.currency || 'RUB',\n    category: extracted.category || 'прочее',\n    confidence: Number.isFinite(confidence) ? confidence : 0,\n    needs_review: reasons.length > 0,\n    review_reason: reasons.join('; '),\n    repairs: checked.repairs.map((r) => `${r.field}: ${r.raw} -> ${r.value}`).join('; '),\n    raw_text: (extracted.raw_text || '').slice(0, 2000),\n  }};\n});\n"
+      },
+      "id": "e1000000-0000-4000-8000-000000000028",
+      "name": "Validate Receipt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        -120
+      ],
+      "notes": "Generated from builds/01-receipt-bot/normalize.js. Repairs OCR glyph confusion in NUMERIC fields only; vendor text is never character-substituted. 39 tests, incl. the real receipt corpus."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000029",
+              "leftValue": "={{ $json.needs_review }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000030",
+      "name": "Needs Review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2300,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "25yu324nu4cOPzGQ",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "event_id": "={{ $json.event_id }}",
+            "channel": "={{ $json.channel }}",
+            "user_id": "={{ Number($json.user_id) }}",
+            "vendor": "={{ $json.vendor }}",
+            "expense_date": "={{ $json.expense_date }}",
+            "total": "={{ $json.total }}",
+            "currency": "={{ $json.currency }}",
+            "category": "={{ $json.category }}",
+            "confidence": "={{ $json.confidence }}",
+            "needs_review": "={{ $json.needs_review }}",
+            "review_reason": "={{ $json.review_reason }}",
+            "raw_text": "={{ $json.raw_text }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000031",
+      "name": "Log Expense",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        2500,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "25yu324nu4cOPzGQ",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "event_id": "={{ $json.event_id }}",
+            "channel": "={{ $json.channel }}",
+            "user_id": "={{ Number($json.user_id) }}",
+            "vendor": "={{ $json.vendor }}",
+            "expense_date": "={{ $json.expense_date }}",
+            "total": "={{ $json.total }}",
+            "currency": "={{ $json.currency }}",
+            "category": "={{ $json.category }}",
+            "confidence": "={{ $json.confidence }}",
+            "needs_review": true,
+            "review_reason": "={{ $json.review_reason }}",
+            "raw_text": "={{ $json.raw_text }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000032",
+      "name": "Log For Review",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        2500,
+        -260
+      ],
+      "notes": "A parse failure is still recorded, with its reason. Never a silent drop and never an automated rejection."
     },
     {
       "parameters": {
         "assignments": {
           "assignments": [
             {
-              "id": "f1e2d3c4-0001-4000-8000-000000000001",
-              "name": "channel",
-              "value": "telegram",
-              "type": "string"
-            },
-            {
-              "id": "f1e2d3c4-0002-4000-8000-000000000002",
-              "name": "user_id",
-              "value": "={{ $json.message?.from?.id?.toString() ?? '' }}",
-              "type": "string"
-            },
-            {
-              "id": "f1e2d3c4-0008-4000-8000-000000000008",
-              "name": "chat_id",
-              "value": "={{ $json.message?.chat?.id?.toString() ?? '' }}",
-              "type": "string"
-            },
-            {
-              "id": "f1e2d3c4-0003-4000-8000-000000000003",
-              "name": "session_key",
-              "value": "={{ 'telegram:' + ($json.message?.from?.id ?? 'unknown') }}",
-              "type": "string"
-            },
-            {
-              "id": "f1e2d3c4-0004-4000-8000-000000000004",
-              "name": "text",
-              "value": "={{ $json.message?.text ?? $json.message?.caption ?? '' }}",
-              "type": "string"
-            },
-            {
-              "id": "f1e2d3c4-0005-4000-8000-000000000005",
-              "name": "file_id",
-              "value": "={{ $json.message?.photo?.length ? $json.message.photo[$json.message.photo.length - 1].file_id : ($json.message?.document?.file_id ?? '') }}",
-              "type": "string"
-            },
-            {
-              "id": "f1e2d3c4-0006-4000-8000-000000000006",
-              "name": "message_id",
-              "value": "={{ $json.message?.message_id?.toString() ?? '' }}",
-              "type": "string"
-            },
-            {
-              "id": "f1e2d3c4-0007-4000-8000-000000000007",
-              "name": "ts",
-              "value": "={{ $json.message?.date ? new Date($json.message.date * 1000).toISOString() : $now.toISO() }}",
-              "type": "string"
+              "id": "e1000000-0000-4000-8000-000000000033",
+              "name": "reply_text",
+              "type": "string",
+              "value": "=✅ Записал\n\n{{ $json.vendor || 'Продавец не распознан' }}\n{{ $json.total }} {{ $json.currency }}\n{{ $json.expense_date }}\nКатегория: {{ $json.category }}{{ $json.repairs ? '\\n\\n⚠️ Исправлено при распознавании: ' + $json.repairs : '' }}"
             }
           ]
         },
-        "includeOtherFields": false,
+        "includeOtherFields": true,
         "options": {}
       },
-      "id": "b2e1d4c3-2f5a-4b81-8d22-1c8e6f3b2002",
-      "name": "Normalize Message",
+      "id": "e1000000-0000-4000-8000-000000000034",
+      "name": "Reply — Logged",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        20,
-        0
+        2700,
+        -40
       ]
     },
     {
       "parameters": {
-        "chatId": "={{ $json.chat_id }}",
-        "text": "=Получено: {{ $json.text || '(без текста)' }}",
-        "additionalFields": {
-          "appendAttribution": false
-        }
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000035",
+              "name": "reply_text",
+              "type": "string",
+              "value": "=⚠️ Не смог распознать чек полностью\n\n{{ $json.review_reason }}\n\nЗаписал на ручную проверку. Можно переснять при лучшем освещении."
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
       },
-      "id": "c3d2e5f4-3a6b-4c72-9e33-2d9f7a4c3003",
-      "name": "Send Reply",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
+      "id": "e1000000-0000-4000-8000-000000000036",
+      "name": "Reply — Needs Review",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
       "position": [
-        260,
+        2700,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000037",
+              "name": "reply_text",
+              "type": "string",
+              "value": "=⚠️ Не удалось прочитать фото\n\n{{ $json.ocr_reason }}\n\nПопробуйте переснять: чек целиком в кадре, при хорошем освещении, без бликов."
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000038",
+      "name": "Reply — Bad Photo",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1900,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000039",
+              "name": "reply_text",
+              "type": "string",
+              "value": "={{ $('Normalize VK Event').item.json.file_kind === 'doc_unsupported' ? '⚠️ PDF пока не поддерживается — пришлите фото чека.' : 'Пришлите фото чека, и я запишу расход.' }}"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000040",
+      "name": "Reply — Text Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        900,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.vk.com/method/messages.send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "peer_id",
+              "value": "={{ $('Normalize VK Event').item.json.chat_id }}"
+            },
+            {
+              "name": "random_id",
+              "value": "={{ $('Normalize VK Event').item.json.reply_random_id }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.reply_text }}"
+            },
+            {
+              "name": "v",
+              "value": "5.199"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000041",
+      "name": "Send VK Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2950,
         0
       ],
       "credentials": {
-        "telegramApi": {
+        "httpQueryAuth": {
           "id": "REPLACE_ON_IMPORT",
-          "name": "Telegram account"
+          "name": "VK Group Token"
         }
-      }
+      },
+      "notes": "Query Auth credential supplies access_token, so the token never enters this file."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000042",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e1000000-0000-4000-8000-000000000043",
+      "name": "VK Returned An Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3150,
+        0
+      ],
+      "notes": "VK answers 200 OK with an {\"error\":{...}} body on failure. HTTP status alone never catches it."
+    },
+    {
+      "parameters": {
+        "errorMessage": "=VK API error {{ $json.error.error_code }}: {{ $json.error.error_msg }}"
+      },
+      "id": "e1000000-0000-4000-8000-000000000044",
+      "name": "Raise VK Error",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        3350,
+        -120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "e1000000-0000-4000-8000-000000000045",
+      "name": "Sent",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3350,
+        100
+      ]
     }
   ],
   "connections": {
-    "Telegram Trigger": {
+    "VK Webhook": {
       "main": [
         [
           {
-            "node": "Normalize Message",
+            "node": "Is Confirmation?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Normalize Message": {
+    "Is Confirmation?": {
       "main": [
         [
           {
-            "node": "Send Reply",
+            "node": "Respond Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond OK": {
+      "main": [
+        [
+          {
+            "node": "Secret Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Secret Valid?": {
+      "main": [
+        [
+          {
+            "node": "Is New Message?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Drop — Bad Secret",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is New Message?": {
+      "main": [
+        [
+          {
+            "node": "Normalize VK Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize VK Event": {
+      "main": [
+        [
+          {
+            "node": "Seen Before?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seen Before?": {
+      "main": [
+        [
+          {
+            "node": "Already Processed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Processed?": {
+      "main": [
+        [
+          {
+            "node": "Drop — Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Seen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Seen": {
+      "main": [
+        [
+          {
+            "node": "Has Image?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Image?": {
+      "main": [
+        [
+          {
+            "node": "Download Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply — Text Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image": {
+      "main": [
+        [
+          {
+            "node": "Image To Base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image To Base64": {
+      "main": [
+        [
+          {
+            "node": "Yandex Vision OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Yandex Vision OCR": {
+      "main": [
+        [
+          {
+            "node": "OCR To Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OCR To Text": {
+      "main": [
+        [
+          {
+            "node": "OCR Usable?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OCR Usable?": {
+      "main": [
+        [
+          {
+            "node": "Extract Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply — Bad Photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qwen 3 (Yandex AI Studio)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Extract Fields",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Fields": {
+      "main": [
+        [
+          {
+            "node": "Validate Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Receipt": {
+      "main": [
+        [
+          {
+            "node": "Needs Review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Review?": {
+      "main": [
+        [
+          {
+            "node": "Log For Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Expense",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Expense": {
+      "main": [
+        [
+          {
+            "node": "Reply — Logged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log For Review": {
+      "main": [
+        [
+          {
+            "node": "Reply — Needs Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply — Logged": {
+      "main": [
+        [
+          {
+            "node": "Send VK Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply — Needs Review": {
+      "main": [
+        [
+          {
+            "node": "Send VK Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply — Bad Photo": {
+      "main": [
+        [
+          {
+            "node": "Send VK Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply — Text Message": {
+      "main": [
+        [
+          {
+            "node": "Send VK Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send VK Reply": {
+      "main": [
+        [
+          {
+            "node": "VK Returned An Error?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VK Returned An Error?": {
+      "main": [
+        [
+          {
+            "node": "Raise VK Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sent",
             "type": "main",
             "index": 0
           }
