@@ -21,14 +21,18 @@ Never skip `automation-cto` on a fuzzy idea. A brief on an undecided architectur
 - **OCR/STT:** Yandex Vision OCR, Yandex SpeechKit. IAM tokens expire in 12h — refresh on a schedule.
 - **Storage:** Postgres (separate DB from n8n's own), Redis, Qdrant. Never n8n's Simple Vector Store — in-memory, dies on restart.
 - **CRM:** Bitrix24. Client-owned credentials, always.
-- **Telegram needs TWO Cloudflare Workers — both directions are blocked.** Verified 2026-09-04. This is the single hardest thing about this stack.
-  - **Outbound** (n8n → Telegram): `api.telegram.org` is unreachable/intermittent from the VPS. Symptom: Publish returns 504, `getWebhookInfo` shows `url: ""`. Fix: Worker `edrus-telegram`, set as **Base URL** on every Telegram credential. Source: `builds/01-receipt-bot/cloudflare-worker-telegram-proxy.js`.
-  - **Inbound** (Telegram → n8n): Telegram cannot reach `5.42.99.81`. Symptom: `url` registered but `last_error_message: "Connection timed out"`, `pending_update_count` climbing, replies minutes late or never. Fix: Worker `tg-in` + `WEBHOOK_URL=https://tg-in.naimatwxm03.workers.dev/` in `/root/n8n/docker-compose.yml`. Source: `builds/01-receipt-bot/cloudflare-worker-n8n-inbound.js`.
-  - **Confirmation it worked:** `getWebhookInfo` shows `ip_address` as a Cloudflare address (e.g. `188.114.96.0`), not `5.42.99.81`. Replies arrive in under 3 seconds.
-  - **VPS gotcha:** `docker compose` (space) is unavailable; use `docker-compose` (hyphen). Version 1.29.2 crashes with `KeyError: 'ContainerConfig'` on recreate — run `docker-compose down && docker-compose up -d` instead.
-  - **Ground truth for any Telegram problem is `getWebhookInfo`**, never the n8n UI. Full procedure: `docs/04-telegram-webhook-runbook.md`.
-- **Telegram from the VPS (superseded, see above):** `api.telegram.org` is **not reachable outbound** from the Timeweb box. Every Telegram credential must set **Base URL** to the Cloudflare Worker proxy (`https://edrus-telegram.naimatwxm03.workers.dev`), never the default `https://api.telegram.org`. Symptom when wrong: Publish fails with a 504 and no webhook is ever registered. Worker source: `builds/01-receipt-bot/cloudflare-worker-telegram-proxy.js`.
-- **Channels:** Telegram is not blocked for users and is a valid primary. Always build the channel-adapter pattern so Telegram → VK is a config change. MAX needs a verified RU legal entity — blocked until ИП/ООО exists.
+- **Channels — VK is the RU default. Decision 02, 2026-09-13.**
+  - **VK Callback API is the primary inbound path.** VK's servers are in Russia, so Russian-server → Russian-IP works where Telegram could not. **VK Long Poll** is the fallback and needs no inbound connectivity at all.
+  - **Ground truth for VK is `groups.getCallbackServers`** (`status`: `ok` / `failed` / `wait`), never the n8n UI. Setup: `docs/05-vk-setup.md`.
+  - **Three mechanics that decide whether a VK build works:** (1) the confirmation handshake demands the bare confirmation string as **plain text**, so the Webhook node must use **Respond: Using 'Respond to Webhook' Node**, never the default JSON; (2) **respond `ok` before doing any work** — VK retries a slow endpoint and you log the same event twice; (3) **verify the `secret` field on every event** — the URL is public.
+  - **No native VK node in n8n.** Everything is HTTP Request, through the shared adapter in `builds/vk-adapter/`. Photo URLs arrive in the payload — no `getFile` step, no `file_id` expiry.
+  - `random_id` on `messages.send` must be non-zero and unique, or VK silently drops the message as a duplicate.
+  - Always build the channel-adapter pattern so VK → Avito → MAX is a new adapter plus a config change, never a rebuild. MAX still needs a verified RU legal entity — blocked until ИП/ООО exists.
+- **Telegram is a global-client channel only. Not on any RU critical path.**
+  - **Outbound works** and stays working: `api.telegram.org` is unreachable from the VPS, so every Telegram credential sets **Base URL** to the Worker `https://edrus-telegram.naimatwxm03.workers.dev`. Symptom when wrong: Publish returns 504, `getWebhookInfo` shows `url: ""`. Source: `builds/01-receipt-bot/cloudflare-worker-telegram-proxy.js`.
+  - **Inbound is unsolved and shelved.** Telegram's servers cannot reach `5.42.99.81`, and `*.workers.dev` is not reliably resolvable by Telegram's resolvers — so the `tg-in` Worker is a dead end. The fix is Decision 01 (put `n-enterprise.ru` on Cloudflare DNS, 20 min, 0 ₽) and it is **not executed**. Do it only when a global client needs Telegram or WhatsApp.
+  - **Ground truth for any Telegram problem is `getWebhookInfo`**, never the n8n UI. A 504 on Publish means outbound; `last_error_message: "Connection timed out"` means inbound. Full procedure: `docs/04-telegram-webhook-runbook.md`.
+- **VPS gotcha:** `docker compose` (space) is unavailable; use `docker-compose` (hyphen). Version 1.29.2 crashes with `KeyError: 'ContainerConfig'` on recreate — run `docker-compose down && docker-compose up -d` instead.
 - **Payability rule:** nothing on a critical path may require a card that doesn't work from Russia.
 
 ## Conventions
