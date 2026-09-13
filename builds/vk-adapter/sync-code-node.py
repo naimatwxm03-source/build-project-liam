@@ -112,7 +112,7 @@ return $input.all().map((item) => {
       vendor: '', expense_date: null, total: null, currency: 'RUB',
       category: 'прочее', confidence: 0,
       items: [], items_json: '[]', items_count: 0, items_total: 0, items_reconciled: null,
-      raw_text: (extracted.raw_text || '').slice(0, 2000),
+      raw_text: String(envelope.receipt_text || '').slice(0, 2000),
     }};
   }
 
@@ -166,7 +166,7 @@ return $input.all().map((item) => {
     items_total: parsedItems.itemsTotal,
     items_reconciled: parsedItems.reconciled,
     repairs: checked.repairs.map((r) => `${r.field}: ${r.raw} -> ${r.value}`).join('; '),
-    raw_text: (extracted.raw_text || '').slice(0, 2000),
+    raw_text: String(envelope.receipt_text || '').slice(0, 2000),
   }};
 });
 """
