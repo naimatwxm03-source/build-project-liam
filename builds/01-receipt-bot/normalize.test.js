@@ -269,5 +269,73 @@ if (fs.existsSync(resultsDir)) {
 }
 
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Regression corpus: values taken verbatim from the Vision OCR output of the
+// two real ООО «Рафаэль» slips in ocr-results/ (Samara, 25.08.2026).
+// Before the noise-stripping layer, only a bare "2'690.00" parsed — every
+// other real total failed and would have gone to manual review.
+// ---------------------------------------------------------------------------
+test('real receipt totals all parse', () => {
+  const corpus = [
+    ["=10480.00", 10480],
+    ["=77856.00", 77856],
+    ["=67376.00", 67376],
+    ["=0.00", 0],
+    ["67'376.00 РУБ", 67376],
+    ["2'690.00 РУБ", 2690],
+    ["2'240.00 РУБ", 2240],
+    ["1'790.00 РУБ", 1790],
+    ["1'990.00 РУБ", 1990],
+    ["2'700.00 РУБ", 2700],
+    ["600.00 РУБ", 600],
+  ];
+  for (const [raw, expected] of corpus) {
+    const r = N.parseAmount(raw);
+    assert.strictEqual(r.ok, true, `${raw} failed: ${r.reason}`);
+    assert.strictEqual(r.value, expected, `${raw} -> ${r.value}`);
+  }
+});
+
+test("З'980.00 РУБ is repaired to 3980, and flagged as repaired", () => {
+  const r = N.parseAmount("З'980.00 РУБ");
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.value, 3980);
+  assert.strictEqual(r.repaired, true, 'must be auditable as a repaired value');
+});
+
+test('currency and "=" stripping cannot manufacture a number from text', () => {
+  for (const junk of ['ООО', 'ЗАО', 'РУБ', '= РУБ', 'ООО РУБ', '=']) {
+    const r = N.parseAmount(junk);
+    assert.strictEqual(r.ok, false, `${junk} must not parse, got ${r.value}`);
+  }
+});
+
+test('vendor names survive stripping and repair untouched', () => {
+  assert.strictEqual(N.normalizeText('ООО РАФАЗЛЬ'), 'ООО РАФАЗЛЬ');
+  assert.strictEqual(N.normalizeText('ООО "Рафаэль"'), 'ООО "Рафаэль"');
+});
+
+test('card masks with a trailing terminal status letter parse', () => {
+  for (const [raw, last4] of [['****5353 W', '5353'], ['****1849 W', '1849'], ['****9355', '9355']]) {
+    const r = N.parseCardMask(raw);
+    assert.strictEqual(r.ok, true, `${raw} failed`);
+    assert.strictEqual(r.value, last4);
+  }
+});
+
+test('card mask never returns more than the last four digits', () => {
+  assert.strictEqual(N.parseCardMask('****0327 W').value.length, 4);
+});
+
+test('real receipt dates parse in both two- and four-digit year forms', () => {
+  assert.strictEqual(N.parseDate('25.08.2026').value, '2026-08-25');
+  assert.strictEqual(N.parseDate('25.08.26').value, '2026-08-25');
+});
+
+test('the real ИНН from the slip passes its checksum', () => {
+  assert.strictEqual(N.parseInn('7720425673').ok, true);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

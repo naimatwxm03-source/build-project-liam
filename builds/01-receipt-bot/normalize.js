@@ -89,9 +89,32 @@ function normalizeText(raw) {
   return raw.replace(/\s+/g, ' ').trim();
 }
 
-/** "З'980.00" -> 3980.00 (repaired). "2'690.00" -> 2690.00 (clean). */
+/**
+ * Strip receipt decoration from around an amount, before any repair runs.
+ *
+ * Real slips (ООО «Рафаэль», 25.08.2026) print totals as "=10480.00" and
+ * "67'376.00 РУБ", never as a bare number. The patterns are anchored, so the
+ * decoration alone is enough to fail every real total.
+ *
+ * ORDER MATTERS: this must run BEFORE glyph repair. "РУБ" glyph-maps to "РУ6",
+ * which would turn a strippable suffix into permanent garbage.
+ *
+ * Only a leading "=" and a trailing currency word are removed. Nothing else —
+ * a looser strip would let genuinely malformed values through as plausible
+ * numbers, which is worse than a clean parse failure.
+ */
+function stripAmountNoise(raw) {
+  if (typeof raw !== 'string') return raw;
+  return raw
+    .trim()
+    .replace(/^[=＝]+\s*/, '')
+    .replace(/\s*(?:РУБ(?:ЛЕЙ)?\.?|RUB|руб\.?|₽)\s*$/iu, '')
+    .trim();
+}
+
+/** "З'980.00 РУБ" -> 3980.00 (repaired). "=10480.00" -> 10480.00 (clean). */
 function parseAmount(raw) {
-  const r = repairToken(raw, AMOUNT_RE);
+  const r = repairToken(stripAmountNoise(raw), AMOUNT_RE);
   if (!r) return review('amount', raw, 'unparseable_amount');
   const numeric = r.value.replace(/['’  ]/g, '').replace(',', '.');
   const value = Number(numeric);
@@ -154,8 +177,18 @@ function parseInn(raw) {
 }
 
 /** "****5353" -> last 4 digits. Never returns a full PAN. */
+/**
+ * Terminals print a single trailing status letter after the mask ("****5353 W").
+ * Only one trailing letter, separated by space, is removed — anything more
+ * permissive would swallow real data.
+ */
+function stripCardNoise(raw) {
+  if (typeof raw !== 'string') return raw;
+  return raw.trim().replace(/\s+[A-ZА-Я]$/iu, '').trim();
+}
+
 function parseCardMask(raw) {
-  const r = repairToken(raw, CARD_MASK_RE);
+  const r = repairToken(stripCardNoise(raw), CARD_MASK_RE);
   if (!r) return review('card_mask', raw, 'unparseable_card_mask');
   return {
     ok: true,
@@ -223,6 +256,8 @@ function parseReceipt(fields) {
 
 module.exports = {
   DIGIT_LOOKALIKES,
+  stripAmountNoise,
+  stripCardNoise,
   normalizeText,
   parseAmount,
   parseDate,
