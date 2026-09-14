@@ -254,8 +254,7 @@ return $input.all().map((item) => {
       price_high: r.high,
       price_text: formatRange(r),
       estimate_json: JSON.stringify(r),
-      reply: lines.join('
-'),
+      reply: lines.join('\n'),
     },
   };
 });

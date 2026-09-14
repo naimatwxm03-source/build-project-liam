@@ -18,7 +18,9 @@ n8n@2.36.8. Неверная версия импортируется молча 
 import json
 import pathlib
 import re
+import subprocess
 import sys
+import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 OUT = HERE / "workflow.json"
@@ -141,7 +143,7 @@ def read_source(name: str) -> str:
     return src.rstrip()
 
 
-NORMALIZE_GLUE = """
+NORMALIZE_GLUE = r"""
 
 // ---------------------------------------------------------------------------
 // Склейка с n8n. Всё выше внедряется из normalize-web.js генератором
@@ -152,7 +154,7 @@ return $input.all().map((item) => ({
 }));
 """
 
-RATE_LIMIT_GLUE = """
+RATE_LIMIT_GLUE = r"""
 
 // ---------------------------------------------------------------------------
 //   источник: builds/02-lead-widget/rate-limit.js
@@ -174,7 +176,7 @@ return $input.all().map((item) => {
 });
 """
 
-PARSE_ARGS_GLUE = """
+PARSE_ARGS_GLUE = r"""
 
 // ---------------------------------------------------------------------------
 //   источник: builds/02-lead-widget/estimate-input.js
@@ -198,7 +200,7 @@ return $input.all().map((item) => {
 });
 """
 
-CHECK_ADDRESS_GLUE = """
+CHECK_ADDRESS_GLUE = r"""
 
 // ---------------------------------------------------------------------------
 //   источник: builds/02-lead-widget/address.js
@@ -223,7 +225,7 @@ return $input.all().map((item) => {
 });
 """
 
-COMPUTE_GLUE = """
+COMPUTE_GLUE = r"""
 
 // ---------------------------------------------------------------------------
 //   источник: builds/02-lead-widget/pricing.js
@@ -642,6 +644,42 @@ def build():
     }, codes
 
 
+def check_javascript(codes):
+    """Проверяет, что каждый Code-узел вообще разбирается как JavaScript.
+
+    Генератор, который печатает JS, обязан убедиться, что напечатал JS. Без
+    этой проверки опечатка в склейке доезжает до n8n и всплывает как
+    «Invalid or unexpected token» на живом прогоне — так и случилось: экранирование
+    перевода строки в Python-строке превратилось в настоящий перенос внутри
+    JS-литерала, и сломался узел Compute Estimate.
+
+    Проверка идёт последней: к этому моменту уже видно, что граф собран, и
+    падение указывает ровно на узел, а не на весь файл.
+    """
+    if not shutil_which("node"):
+        print("  node не найден — синтаксис JS не проверен", file=sys.stderr)
+        return True
+
+    ok = True
+    for name, code in codes.items():
+        with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8", delete=False) as f:
+            f.write(code)
+            tmp = f.name
+        res = subprocess.run(["node", "--check", tmp], capture_output=True, text=True)
+        pathlib.Path(tmp).unlink(missing_ok=True)
+        if res.returncode != 0:
+            ok = False
+            print(f"  СИНТАКСИС СЛОМАН в узле «{name}»:", file=sys.stderr)
+            for line in res.stderr.strip().splitlines()[:6]:
+                print(f"    {line}", file=sys.stderr)
+    return ok
+
+
+def shutil_which(cmd):
+    import shutil
+    return shutil.which(cmd)
+
+
 def write_paste_copies(codes):
     """Копии для вставки в живой узел без переимпорта.
 
@@ -857,6 +895,9 @@ def main() -> int:
         (OUT_ESTIMATE, json.dumps(est, indent=2, ensure_ascii=False) + "\n"),
     ]
 
+    if check_only and not check_javascript(all_codes):
+        return 1
+
     if check_only:
         for path, rendered in targets:
             if not path.exists():
@@ -868,6 +909,10 @@ def main() -> int:
                 return 1
         print("workflow.json и estimate.workflow.json в актуальном состоянии")
         return 0
+
+    if not check_javascript(all_codes):
+        print("\nСборка остановлена: JS не разбирается.", file=sys.stderr)
+        return 1
 
     for path, rendered in targets:
         path.write_text(rendered, encoding="utf-8")
