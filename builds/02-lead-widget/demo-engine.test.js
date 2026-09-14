@@ -9,11 +9,19 @@ const test = require('node:test');
 const assert = require('node:assert');
 const vm = require('node:vm');
 const fs = require('node:fs');
+const path = require('node:path');
+
+// Пути от файла теста, а не от текущего каталога. С относительными путями
+// `node --test builds/02-lead-widget/*.test.js` из корня репозитория падает
+// девятью тестами — при полностью исправном коде. Один раз это уже стоило
+// ложной тревоги; в CI стоило бы дороже.
+const here = (name) => path.join(__dirname, name);
 
 function newBot() {
   const ctx = vm.createContext({ Math, Promise, setTimeout, console, window: {} });
-  vm.runInContext(fs.readFileSync('pricing.js', 'utf8'), ctx, { filename: 'pricing.js' });
-  vm.runInContext(fs.readFileSync('demo-engine.js', 'utf8'), ctx, { filename: 'demo-engine.js' });
+  for (const file of ['pricing.js', 'demo-engine.js']) {
+    vm.runInContext(fs.readFileSync(here(file), 'utf8'), ctx, { filename: file });
+  }
   return (payload) => ctx.window.NXAI_DEMO_REPLY(payload);
 }
 
