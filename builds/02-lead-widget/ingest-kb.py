@@ -28,6 +28,7 @@ import os
 import re
 import pathlib
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -42,6 +43,20 @@ YANDEX_BASE = "https://llm.api.cloud.yandex.net"
 # взаимозаменяемо: индексировать документы моделью для запросов — тихая потеря
 # качества поиска, которую потом принимают за «RAG не работает».
 DOC_MODEL = "text-search-doc"
+
+# Яндекс отдаёт 10 запросов эмбеддингов в секунду и отвечает 429 на одиннадцатый.
+# Первый прогон упал ровно на 11-м куске. Держим 4 запроса в секунду: разница
+# между 3 и 14 секундами на разовой загрузке несущественна, а запас от квоты
+# избавляет от гонки, когда кто-то ещё работает с тем же аккаунтом.
+MIN_INTERVAL = 0.25
+_last_call = [0.0]
+
+
+def pace():
+    wait = MIN_INTERVAL - (time.monotonic() - _last_call[0])
+    if wait > 0:
+        time.sleep(wait)
+    _last_call[0] = time.monotonic()
 
 
 def die(msg: str) -> "NoReturn":
@@ -70,20 +85,36 @@ def chunks(markdown: str):
 
 # --- HTTP ---------------------------------------------------------------------
 
-def post_json(url: str, payload: dict, headers: dict, timeout: int = 60) -> dict:
+def post_json(url: str, payload: dict, headers: dict, timeout: int = 60, retries: int = 5) -> dict:
+    """POST с повтором на 429.
+
+    Ограничение по скорости — не ошибка, а нормальный ответ сервиса, который
+    просит подождать. Падать на нём, потеряв уже оплаченные эмбеддинги, глупо.
+    """
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(url, data=body, method="POST")
-    req.add_header("Content-Type", "application/json")
-    for k, v in headers.items():
-        req.add_header(k, v)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:600]
-        die(f"{url} вернул {e.code}\n{detail}")
-    except urllib.error.URLError as e:
-        die(f"{url} недоступен: {e.reason}")
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(url, data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        for k, v in headers.items():
+            req.add_header(k, v)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:600]
+            if e.code == 429 and attempt < retries:
+                delay = 2 ** attempt
+                print(f"    лимит скорости, пауза {delay} c…")
+                time.sleep(delay)
+                continue
+            die(f"{url} вернул {e.code}\n{detail}")
+        except urllib.error.URLError as e:
+            if attempt < retries:
+                delay = 2 ** attempt
+                print(f"    сеть подвела ({e.reason}), пауза {delay} c…")
+                time.sleep(delay)
+                continue
+            die(f"{url} недоступен: {e.reason}")
 
 
 def put_json(url: str, payload: dict, timeout: int = 60) -> dict:
@@ -112,6 +143,7 @@ def embed(text: str, api_key: str, folder: str, native: bool):
     разница только в количестве узлов.
     """
     headers = {"Authorization": f"Api-Key {api_key}"}
+    pace()
 
     if native:
         res = post_json(
