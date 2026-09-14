@@ -1,0 +1,449 @@
+{
+  "name": "02 Lead Widget — Calc Estimate",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "when-executed-by-another-workflow",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Разбор аргументов, которые модель передала в инструмент расчёта.\n *\n * ЭТО ГРАНИЦА ДОВЕРИЯ. Всё, что приходит сюда, придумала языковая модель по\n * тексту живого человека. Она передаст «трёхметровый», «примерно 3м», «ну\n * обычный», null, пустую строку и слово «балкон» в поле типа остекления.\n * Бриф прямо предупреждает: «Model passes address as null — validate in the\n * sub-flow, don't trust it».\n *\n * Поэтому здесь не «приведение типов», а разбор естественного языка с явным\n * отказом. Чего не поняли — о том честно сообщаем наверх, и агент переспросит.\n * Молча подставить значение по умолчанию нельзя: клиент увидит цену за лоджию\n * 6 метров там, где у него балкон 3 метра, и это будет наша вина.\n */\n'use strict';\n\n/** Нормализация под сравнение: регистр, ё, дефисы, лишние пробелы. */\nfunction fold(value) {\n  if (value == null) return '';\n  return String(value)\n    .toLowerCase()\n    .replace(/ё/g, 'е')\n    .replace(/[-–—_]+/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\n/**\n * Конфигурация балкона.\n *\n * Порядок проверок важен. «П-образная лоджия» содержит и «лоджия», и «п\n * образн» — выиграть должно «п образн», потому что форма определяет метраж\n * сильнее, чем название помещения.\n */\nfunction parseConfiguration(raw) {\n  const t = fold(raw);\n  if (!t) return null;\n\n  if (/(^|\\s)(п образн|побразн|п образный|углов)/.test(t)) return 'pshaped';\n  if (/лодж/.test(t)) return 'loggia6';\n  if (/(^|\\s)(прям|балкон)/.test(t)) return 'straight3';\n\n  // Иногда модель передаёт только длину.\n  const metres = t.match(/(\\d+(?:[.,]\\d+)?)\\s*(?:м|метр)/);\n  if (metres) {\n    const n = parseFloat(metres[1].replace(',', '.'));\n    if (Number.isFinite(n)) return n >= 5 ? 'loggia6' : 'straight3';\n  }\n\n  // Английские ключи — на случай, если модель передала их из описания инструмента.\n  if (/^(straight3|pshaped|loggia6)$/.test(t)) return t;\n\n  return null;\n}\n\n/** Тип остекления. Отдельная функция: ошибка здесь меняет цену на четверть. */\nfunction parseGlazing(raw) {\n  const t = fold(raw);\n  if (!t) return null;\n  if (/(тепл|утепл|зим|жил)/.test(t)) return 'warm';\n  if (/(холод|не тепл|летн)/.test(t)) return 'cold';\n  if (/^(warm|cold)$/.test(t)) return t;\n  return null;\n}\n\n/** Класс профиля — необязателен: без него отдаём вилку от эконома до премиума. */\nfunction parseTier(raw) {\n  const t = fold(raw);\n  if (!t) return null;\n  if (/(эконом|дешев|подешевл|бюджет|минимальн)/.test(t)) return 'economy';\n  if (/(премиум|максимальн|лучш|дорог|топ)/.test(t)) return 'premium';\n  if (/(стандарт|средн|обычн|оптимальн)/.test(t)) return 'standard';\n  if (/^(economy|standard|premium)$/.test(t)) return t;\n  return null;\n}\n\n/**\n * Булев флаг из чего угодно.\n *\n * Модель присылает true, \"true\", \"да\", \"yes\", 1, \"нужен\", \"не нужен\".\n * `Boolean(\"не нужен\")` равен true — поэтому отрицания проверяются первыми,\n * иначе «крыша не нужна» превратится в наценку 18 %.\n */\nfunction parseFlag(raw) {\n  if (raw === true) return true;\n  if (raw === false) return false;\n  const t = fold(raw);\n  if (!t) return false;\n  if (/(^|\\s)(не|нет|без)(\\s|$)/.test(t)) return false;\n  // Основа «нуж», а не «нужн»: в мужском роде беглая гласная даёт «нужен»,\n  // и стем «нужн» его не ловит. На этом тест и поймал ошибку — «нужен вынос»\n  // читался как «вынос не нужен» и тихо срезал 22 % из сметы.\n  return /(^|\\s)(да|нуж|надо|есть|true|yes|1|последн|верхн)/.test(t);\n}\n\n/** Этаж — только чтобы понять, последний ли он. Само число на цену не влияет. */\nfunction parseFloor(raw) {\n  if (raw == null || raw === '') return null;\n  const n = parseInt(String(raw).replace(/\\D+/g, ''), 10);\n  return Number.isFinite(n) && n > 0 && n < 200 ? n : null;\n}\n\n/**\n * Адрес нужен не для цены, а для проверки реальности объекта и для лида.\n * Районных цен у нас нет, и выдумывать наценку по району мы не будем —\n * поэтому адрес сюда попадает как есть, а решает по нему геокодер.\n */\nfunction parseAddress(raw) {\n  const s = raw == null ? '' : String(raw).trim().replace(/\\s+/g, ' ');\n  return s.slice(0, 300);\n}\n\n/**\n * @returns {{ok: boolean, value: object, missing: string[], notes: string[]}}\n *   ok — хватает ли данных для расчёта\n *   missing — что переспросить у человека, человеческими словами\n */\nfunction parseEstimateArgs(args) {\n  const a = args && typeof args === 'object' ? args : {};\n\n  const configuration = parseConfiguration(\n    a.configuration !== undefined ? a.configuration : a.balcony_type\n  );\n  const glazing = parseGlazing(a.glazing !== undefined ? a.glazing : a.glazing_type);\n  const profileTier = parseTier(a.profile_tier !== undefined ? a.profile_tier : a.tier);\n  const floor = parseFloor(a.floor);\n\n  // Последний этаж можно узнать двумя путями, и оба надо принять: модель то\n  // передаёт отдельный флаг, то пишет «последний» прямо в поле этажа.\n  const topFlagGiven = a.top_floor !== undefined || a.is_top_floor !== undefined;\n  const topFloor = topFlagGiven\n    ? parseFlag(a.top_floor !== undefined ? a.top_floor : a.is_top_floor)\n    : parseFlag(a.floor);\n\n  const extension = parseFlag(a.extension !== undefined ? a.extension : a.with_extension);\n  const address = parseAddress(a.address);\n\n  const missing = [];\n  if (!configuration) missing.push('конфигурация балкона: прямой 3 метра, П-образный или лоджия');\n  if (!glazing) missing.push('тип остекления: тёплое или холодное');\n\n  const notes = [];\n  if (!profileTier) notes.push('класс профиля не указан — вилка от эконома до премиума');\n  if (floor === null && !topFlagGiven) notes.push('этаж не указан — крыша в расчёт не включена');\n\n  return {\n    ok: missing.length === 0,\n    missing,\n    notes,\n    value: {\n      configuration,\n      glazing,\n      profileTier,\n      topFloor,\n      extension,\n      floor,\n      address,\n    },\n  };\n}\n\n// ---------------------------------------------------------------------------\n//   источник: builds/02-lead-widget/estimate-input.js\n//\n// Всё, что приходит сюда, придумала языковая модель по фразе живого человека.\n// Это граница доверия, а не приведение типов.\n// ---------------------------------------------------------------------------\nreturn $input.all().map((item) => {\n  const parsed = parseEstimateArgs(item.json);\n  return {\n    json: {\n      ...parsed.value,\n      session_id: String(item.json.session_id || ''),\n      args_ok: parsed.ok,\n      missing: parsed.missing,\n      missing_text: parsed.missing.join('; '),\n      notes: parsed.notes,\n      has_address: Boolean(parsed.value.address),\n    },\n  };\n});\n"
+      },
+      "id": "parse-estimate-args",
+      "name": "Parse Estimate Args",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -20,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "args-complete?",
+              "leftValue": "={{ $json.args_ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "args-complete?",
+      "name": "Args Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "ok",
+              "type": "boolean",
+              "value": false
+            },
+            {
+              "id": "reply",
+              "name": "reply",
+              "type": "string",
+              "value": "=Для расчёта не хватает: {{ $json.missing_text }}. Спроси это у человека и вызови расчёт ещё раз."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "result---need-details",
+      "name": "Result — Need Details",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        420,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "address-given?",
+              "leftValue": "={{ $json.has_address }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "address-given?",
+      "name": "Address Given?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        420,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://cleaner.dadata.ru/api/v1/clean/address",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([$json.address]) }}",
+        "options": {}
+      },
+      "id": "dadata---clean-address",
+      "name": "DaData — Clean Address",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        120
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "DaData"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Разбор ответа DaData «стандартизация адресов» в решение: считать или переспросить.\n *\n * Правило простое и на нём держится доверие к сборке: НЕТ ВНЯТНОГО АДРЕСА —\n * НЕТ ЦЕНЫ. Тест 3 из брифа именно про это: на «ул. Пушкина» бот обязан\n * переспросить, а не назвать сумму. Цена, названная по адресу, которого не\n * существует, — это счёт, который заказчик потом не выставит, и разговор,\n * который он проведёт с нами, а не с клиентом.\n *\n * Адрес НЕ влияет на стоимость. Районных прайсов у нас нет, и наценку по\n * району мы не изобретаем (см. PRICING-SOURCES.md). Адрес нужен, чтобы\n * (1) убедиться, что объект реальный, (2) убедиться, что он в зоне выезда,\n * (3) передать его замерщику в разобранном виде.\n *\n * Почему разбираем коды, а не смотрим на координаты: DaData отдаёт готовый\n * вердикт полями qc и qc_complete. Выводить то же самое из координат — писать\n * эвристику поверх сервиса, который уже ответил.\n */\n'use strict';\n\n/** Регионы, куда компания выезжает. Меняется при внедрении у заказчика. */\nconst SERVICE_REGIONS = ['самарская'];\n\n/**\n * qc — нужна ли ручная проверка распознанного адреса.\n * Значения из документации DaData, не выдуманы.\n */\nconst QC = {\n  CONFIDENT: 0, // распознан уверенно\n  NEEDS_CHECK: 1, // лишние части или данных мало\n  GARBAGE: 2, // пустой или заведомо мусорный\n  AMBIGUOUS: 3, // есть альтернативные варианты\n};\n\n/**\n * qc_complete — годится ли адрес для доставки. Нам он говорит, чего не хватает.\n * Порядок в этой таблице — это порядок, в котором мы просим уточнить: нет\n * смысла спрашивать номер дома, если не назван город.\n */\nconst INCOMPLETE_REASON = {\n  1: 'не указан регион',\n  2: 'не указан город',\n  3: 'не указана улица',\n  4: 'не указан номер дома',\n  6: 'адрес неполный',\n  7: 'это адрес не в России',\n};\n\nfunction str(v) {\n  return v == null ? '' : String(v).trim();\n}\n\nfunction firstRecord(response) {\n  // DaData отвечает массивом даже на один адрес. Узел HTTP Request в n8n\n  // отдаёт его то массивом, то объектом с полем data — принимаем оба.\n  if (Array.isArray(response)) return response[0] || null;\n  if (response && typeof response === 'object') {\n    if (Array.isArray(response.data)) return response.data[0] || null;\n    if (response.result !== undefined || response.qc !== undefined) return response;\n  }\n  return null;\n}\n\nfunction inServiceArea(region) {\n  const r = str(region).toLowerCase().replace(/ё/g, 'е');\n  if (!r) return false;\n  return SERVICE_REGIONS.some((s) => r.includes(s));\n}\n\n/**\n * @returns {{ok: boolean, reason: string, ask: string, address: object}}\n *   ok      — можно ли считать смету\n *   reason  — техническая причина отказа, для лога\n *   ask     — что сказать человеку; пусто, если всё в порядке\n *   address — разобранный адрес для лида\n */\nfunction interpretAddress(response) {\n  const rec = firstRecord(response);\n\n  if (!rec) {\n    // Сервис не ответил или ответил непонятно. Это НЕ повод отказать человеку:\n    // адрес на цену не влияет, а терять лид из-за сбоя стороннего сервиса —\n    // худший из возможных исходов. Считаем, но помечаем адрес непроверенным.\n    return {\n      ok: true,\n      degraded: true,\n      reason: 'DaData не ответила — адрес не проверен',\n      ask: '',\n      address: { raw: '', result: '', city: '', street: '', house: '', region: '' },\n    };\n  }\n\n  const address = {\n    raw: str(rec.source),\n    result: str(rec.result),\n    region: str(rec.region_with_type) || str(rec.region),\n    city: str(rec.city_with_type) || str(rec.city) || str(rec.settlement_with_type),\n    district: str(rec.city_district_with_type),\n    street: str(rec.street_with_type),\n    house: str(rec.house),\n    lat: str(rec.geo_lat),\n    lon: str(rec.geo_lon),\n    fias_level: rec.fias_level == null ? '' : String(rec.fias_level),\n  };\n\n  const qc = Number(rec.qc);\n  const complete = Number(rec.qc_complete);\n\n  if (qc === QC.GARBAGE) {\n    return {\n      ok: false,\n      degraded: false,\n      reason: 'qc=2: адрес пустой или мусорный',\n      ask: 'Не разобрал адрес. Напишите, пожалуйста, город, улицу и номер дома.',\n      address,\n    };\n  }\n\n  // Иностранный адрес ловим раньше зоны выезда: человеку полезнее услышать\n  // «мы работаем только в Самарской области», чем «не указан регион».\n  if (complete === 7) {\n    return {\n      ok: false,\n      degraded: false,\n      reason: 'qc_complete=7: иностранный адрес',\n      ask: 'Мы работаем в Самаре и Самарской области. Подскажите адрес объекта в этом регионе.',\n      address,\n    };\n  }\n\n  if (INCOMPLETE_REASON[complete]) {\n    const what = INCOMPLETE_REASON[complete];\n    return {\n      ok: false,\n      degraded: false,\n      reason: `qc_complete=${complete}: ${what}`,\n      ask: `Уточните, пожалуйста, адрес — ${what}.`,\n      address,\n    };\n  }\n\n  if (qc === QC.AMBIGUOUS) {\n    return {\n      ok: false,\n      degraded: false,\n      reason: 'qc=3: несколько подходящих адресов',\n      ask: 'Таких адресов в городе несколько. Уточните, пожалуйста, район или полное название улицы.',\n      address,\n    };\n  }\n\n  // Регион определился, но не наш. Честно сказать сейчас дешевле, чем\n  // отправить замерщика за 400 км и разбираться потом.\n  if (address.region && !inServiceArea(address.region)) {\n    return {\n      ok: false,\n      degraded: false,\n      reason: `вне зоны выезда: ${address.region}`,\n      ask: `Мы работаем в Самаре и Самарской области, а ${address.region} — за пределами выезда. Подсказать кого-то в вашем городе не смогу, но посчитать для объекта в Самарской области — с радостью.`,\n      address,\n    };\n  }\n\n  // qc=1 — данных маловато, но дом и город есть. Считаем, помечаем адрес\n  // приблизительным: замерщик всё равно позвонит перед выездом.\n  if (qc === QC.NEEDS_CHECK) {\n    return {\n      ok: true,\n      degraded: true,\n      reason: 'qc=1: адрес распознан неточно',\n      ask: '',\n      address,\n    };\n  }\n\n  return { ok: true, degraded: false, reason: '', ask: '', address };\n}\n\n// ---------------------------------------------------------------------------\n//   источник: builds/02-lead-widget/address.js\n//\n// Узел HTTP заменяет элемент ответом DaData, поэтому разобранные аргументы\n// забираем обратно из узла разбора, а не из $json.\n// ---------------------------------------------------------------------------\nconst args = $('Parse Estimate Args').first().json;\n\nreturn $input.all().map((item) => {\n  const verdict = interpretAddress(item.json);\n  return {\n    json: {\n      ...args,\n      address_ok: verdict.ok,\n      address_degraded: verdict.degraded,\n      address_reason: verdict.reason,\n      address_ask: verdict.ask,\n      address_clean: verdict.address,\n    },\n  };\n});\n"
+      },
+      "id": "check-address",
+      "name": "Check Address",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "address-usable?",
+              "leftValue": "={{ $json.address_ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "address-usable?",
+      "name": "Address Usable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "ok",
+              "type": "boolean",
+              "value": false
+            },
+            {
+              "id": "reply",
+              "name": "reply",
+              "type": "string",
+              "value": "={{ $json.address_ask }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "result---clarify-address",
+      "name": "Result — Clarify Address",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Остекление балконов — оценка стоимости по реальным опубликованным прайсам.\n *\n * ИСТОЧНИК (см. PRICING-SOURCES.md — там же даты, ссылки и все цифры):\n *   ООО ГК «Самстрой» / balkon63.ru — публикует настоящую матрицу\n *   8 профилей × 3 конфигурации для тёплого остекления, плюс цены «под ключ»\n *   для холодного. Цифры стабильные, не акционные.\n *\n * ГК «ИнРос» / inros63.ru проверен и ОТКЛОНЁН как источник цен: три страницы\n * сайта называют три разные цены «от» (39 150 / 51 130 / 36 190 ₽), и все под\n * вечным «скидка 60%, только до 14 сентября». Это рекламный якорь, а не\n * прайс-лист. Строить смету на таких числах нельзя.\n *\n * Ни одна цифра здесь не выдумана. Это правило из CLAUDE.md: никогда не\n * изобретать цены клиента. Оценка, построенная на придуманной матрице, — это\n * ложь, которую заказчик обнаружит при первом же звонке конкуренту.\n *\n * ЧТО ЭТО ВОЗВРАЩАЕТ: ВИЛКУ, а не одну цифру. Настоящая смета составляется\n * замерщиком на объекте. Виджет обязан дать честный диапазон и сказать, от чего\n * он зависит, иначе он обещает то, чего не может выполнить.\n *\n * Переносится в n8n Code node как есть — без импортов и Node-specific API.\n */\n\n'use strict';\n\n/**\n * Тёплое остекление «под ключ», руб. Источник: balkon63.ru, прайс 2026.\n * Ключ — конфигурация балкона, значение — [минимум по профилю, максимум].\n *\n * Минимум = Exprof Externa (самый доступный в прайсе).\n * Максимум = KBE-88 (самый дорогой в прайсе).\n */\nconst WARM_BY_CONFIG = {\n  straight3: { low: 18050, high: 36722, label: 'прямой балкон 3 м' },\n  pshaped: { low: 26840, high: 56090, label: 'П-образный балкон' },\n  loggia6: { low: 33884, high: 69909, label: 'лоджия 6 м' },\n};\n\n/**\n * Классы профиля внутри матрицы Самстроя. Границы взяты по фактическим ценам\n * для прямого балкона 3 м, а не назначены произвольно.\n */\nconst PROFILE_TIERS = {\n  economy: { factor: 0.0, label: 'эконом', examples: 'Exprof Externa, KBE Engine' },\n  standard: { factor: 0.45, label: 'стандарт', examples: 'Rehau Thermo, KBE Energy' },\n  premium: { factor: 1.0, label: 'премиум', examples: 'Rehau Brilliant, KBE-88' },\n};\n\n/**\n * Холодное дешевле тёплого.\n *\n * Выведено тремя независимыми способами из одного прайса (balkon63.ru):\n *   лоджия под ключ   13 890 / 18 990 = 0.731\n *   балкон под ключ   16 999 / 22 999 = 0.739\n *   цена за м²         5 149 /  7 149 = 0.720\n * Разброс 0.72–0.74. Берём 0.73.\n */\nconst COLD_FACTOR = 0.73;\n\n/**\n * Надбавки. Проценты, а не рубли: в прайсах они отдельной строкой не указаны,\n * а выводятся из разницы между «остеклением» и «под ключ».\n *\n * ВНИМАНИЕ: это единственные оценочные коэффициенты в файле, и они помечены\n * как таковые в выводе. Их следует заменить на реальный прайс клиента при\n * внедрении — именно об этом надо говорить на встрече.\n */\nconst MODIFIERS = {\n  topFloor: { factor: 0.18, label: 'крыша (последний этаж)', estimated: true },\n  extension: { factor: 0.22, label: 'вынос до 30 см', estimated: true },\n};\n\n/** Минимальные цены по рынку — нижняя граница санитарной проверки. */\nconst MARKET_FLOOR = {\n  cold: 13890, // «Лоджия (холодное остекление)» под ключ, balkon63.ru\n  warm: 18050, // Exprof Externa, прямой балкон 3 м, balkon63.ru\n};\n\nfunction clampConfig(v) {\n  return Object.prototype.hasOwnProperty.call(WARM_BY_CONFIG, v) ? v : 'straight3';\n}\n\nfunction clampTier(v) {\n  return Object.prototype.hasOwnProperty.call(PROFILE_TIERS, v) ? v : null;\n}\n\nfunction roundTo(value, step) {\n  return Math.round(value / step) * step;\n}\n\n/**\n * Оценить стоимость остекления.\n *\n * @param {object} input\n * @param {string} input.configuration  straight3 | pshaped | loggia6\n * @param {string} input.glazing        cold | warm\n * @param {string} [input.profileTier]  economy | standard | premium; без него\n *                                      возвращается вся вилка по профилям\n * @param {boolean} [input.topFloor]    последний этаж — нужна крыша\n * @param {boolean} [input.extension]   с выносом\n * @returns {object} { low, high, currency, breakdown, assumptions, includes, excludes }\n */\nfunction estimate(input) {\n  const inp = input || {};\n  const configuration = clampConfig(inp.configuration);\n  const glazing = inp.glazing === 'cold' ? 'cold' : 'warm';\n  const tier = clampTier(inp.profileTier);\n\n  const base = WARM_BY_CONFIG[configuration];\n  const assumptions = [];\n  const breakdown = [];\n\n  // Базовая вилка по профилям\n  let low = base.low;\n  let high = base.high;\n\n  if (tier) {\n    // Конкретный класс профиля — сужаем вилку вокруг точки на шкале.\n    const f = PROFILE_TIERS[tier].factor;\n    const span = base.high - base.low;\n    const point = base.low + span * f;\n    // ±8 % — разброс между марками внутри одного класса.\n    low = point * 0.92;\n    high = point * 1.08;\n    assumptions.push(\n      `класс профиля: ${PROFILE_TIERS[tier].label} (${PROFILE_TIERS[tier].examples})`\n    );\n  } else {\n    assumptions.push('класс профиля не выбран — показана вилка от эконома до премиума');\n  }\n\n  breakdown.push({\n    item: `Остекление, ${base.label}`,\n    low: Math.round(low),\n    high: Math.round(high),\n  });\n\n  if (glazing === 'cold') {\n    low *= COLD_FACTOR;\n    high *= COLD_FACTOR;\n    breakdown.push({\n      item: 'Холодное остекление вместо тёплого',\n      low: -Math.round(breakdown[0].low * (1 - COLD_FACTOR)),\n      high: -Math.round(breakdown[0].high * (1 - COLD_FACTOR)),\n    });\n  }\n\n  for (const key of ['topFloor', 'extension']) {\n    if (!inp[key]) continue;\n    const m = MODIFIERS[key];\n    const addLow = low * m.factor;\n    const addHigh = high * m.factor;\n    low += addLow;\n    high += addHigh;\n    breakdown.push({ item: m.label, low: Math.round(addLow), high: Math.round(addHigh) });\n    if (m.estimated) assumptions.push(`${m.label} — коэффициент оценочный, уточняется на замере`);\n  }\n\n  // Округляем ПЕРЕД проверкой на минимум. Иначе округление вниз до 500 может\n  // само увести цифру ниже рынка — так и случилось при первом прогоне тестов:\n  // 13 600 превращалось в 13 500, то есть в обещание, которого никто на рынке\n  // не даёт.\n  let roundedLow = roundTo(low, 500);\n  let roundedHigh = roundTo(high, 500);\n\n  const floor = MARKET_FLOOR[glazing];\n  let flooredTo = null;\n  if (roundedLow < floor) {\n    flooredTo = floor;\n    roundedLow = floor;\n    if (roundedHigh < roundedLow) roundedHigh = roundTo(roundedLow * 1.15, 500);\n  }\n\n  return {\n    low: roundedLow,\n    high: roundedHigh,\n    currency: 'RUB',\n    configuration,\n    configurationLabel: base.label,\n    glazing,\n    breakdown,\n    assumptions,\n    flooredTo,\n    // Перечень «что входит» — дословно из balkon63.ru: «монтаж подоконников,\n    // козырьков от верхнего этажа, водоотливов, нащельников и герметизация\n    // конструкции остекления». Не наша выдумка.\n    includes: [\n      'монтаж конструкции',\n      'подоконники',\n      'козырьки',\n      'водоотливы и нащельники',\n      'герметизация',\n    ],\n    excludes: [\n      'внутренняя отделка',\n      'утепление',\n      'электрика и тёплый пол',\n      'шкафы и мебель',\n    ],\n  };\n}\n\n/** Человекочитаемая вилка: «от 18 000 до 37 000 ₽». */\nfunction formatRange(result) {\n  const fmt = (n) => n.toLocaleString('ru-RU');\n  if (!result || result.low == null) return 'не удалось рассчитать';\n  if (result.low === result.high) return `${fmt(result.low)} ₽`;\n  return `от ${fmt(result.low)} до ${fmt(result.high)} ₽`;\n}\n\n// ---------------------------------------------------------------------------\n//   источник: builds/02-lead-widget/pricing.js\n//\n// Тот же модуль, что вызывает демо-страница, и те же цифры из прайса.\n// ---------------------------------------------------------------------------\nreturn $input.all().map((item) => {\n  const a = item.json;\n  const r = estimate({\n    configuration: a.configuration,\n    glazing: a.glazing,\n    profileTier: a.profileTier,\n    topFloor: a.topFloor,\n    extension: a.extension,\n  });\n\n  const lines = [\n    `**${formatRange(r)}**`,\n    '',\n    `${r.configurationLabel}, ${r.glazing === 'warm' ? 'тёплое остекление' : 'холодное остекление'}`,\n    '',\n    'Что входит:',\n    ...r.includes.map((x) => `- ${x}`),\n    '',\n    `Не входит: ${r.excludes.join(', ')}.`,\n  ];\n\n  if (r.assumptions.length) {\n    lines.push('', 'Допущения:', ...r.assumptions.map((x) => `- ${x}`));\n  }\n  if (a.address_degraded && a.has_address) {\n    lines.push('', '_Адрес проверить не удалось — замерщик уточнит его при звонке._');\n  }\n  lines.push(\n    '',\n    'Это **вилка, а не смета**. Точную цену назовёт замерщик на объекте — заочно её не знает никто.'\n  );\n\n  return {\n    json: {\n      ...a,\n      ok: true,\n      price_low: r.low,\n      price_high: r.high,\n      price_text: formatRange(r),\n      estimate_json: JSON.stringify(r),\n      reply: lines.join('\n'),\n    },\n  };\n});\n"
+      },
+      "id": "compute-estimate",
+      "name": "Compute Estimate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "=quoted:{{ $json.session_id }}",
+        "value": "1",
+        "keyType": "string",
+        "expire": true,
+        "ttl": 3600
+      },
+      "id": "mark-quoted",
+      "name": "Mark Quoted",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        300
+      ],
+      "credentials": {
+        "redis": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Redis"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "ok",
+              "type": "boolean",
+              "value": true
+            },
+            {
+              "id": "reply",
+              "name": "reply",
+              "type": "string",
+              "value": "={{ $('Compute Estimate').first().json.reply }}"
+            },
+            {
+              "id": "price_low",
+              "name": "price_low",
+              "type": "number",
+              "value": "={{ $('Compute Estimate').first().json.price_low }}"
+            },
+            {
+              "id": "price_high",
+              "name": "price_high",
+              "type": "number",
+              "value": "={{ $('Compute Estimate').first().json.price_high }}"
+            },
+            {
+              "id": "address",
+              "name": "address",
+              "type": "string",
+              "value": "={{ $('Compute Estimate').first().json.address_clean?.result || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "result---estimate",
+      "name": "Result — Estimate",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1740,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Parse Estimate Args",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Estimate Args": {
+      "main": [
+        [
+          {
+            "node": "Args Complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Args Complete?": {
+      "main": [
+        [
+          {
+            "node": "Address Given?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Result — Need Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Address Given?": {
+      "main": [
+        [
+          {
+            "node": "DaData — Clean Address",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Compute Estimate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DaData — Clean Address": {
+      "main": [
+        [
+          {
+            "node": "Check Address",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Address": {
+      "main": [
+        [
+          {
+            "node": "Address Usable?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Address Usable?": {
+      "main": [
+        [
+          {
+            "node": "Compute Estimate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Result — Clarify Address",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Estimate": {
+      "main": [
+        [
+          {
+            "node": "Mark Quoted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Quoted": {
+      "main": [
+        [
+          {
+            "node": "Result — Estimate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

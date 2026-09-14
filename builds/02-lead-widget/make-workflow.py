@@ -22,9 +22,16 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 OUT = HERE / "workflow.json"
+OUT_ESTIMATE = HERE / "estimate.workflow.json"
 NODE_CODE_DIR = HERE / "node-code"
 
 WORKFLOW_NAME = "02 Lead Widget — Chat"
+ESTIMATE_WORKFLOW_NAME = "02 Lead Widget — Calc Estimate"
+
+# Метка «этой сессии уже показали расчёт». Её ставит подworkflow, а основной
+# поток по ней решает, показывать ли форму контактов. Промпт можно уговорить,
+# ключ в Redis — нельзя: он либо есть, либо нет.
+QUOTED_TTL = 3600
 
 # Домены, которым разрешено обращаться к вебхуку. НЕ "*": открытый лид-вебхук —
 # это чужой бесплатный LLM за счёт клиента. Меняется на домен заказчика.
@@ -167,9 +174,117 @@ return $input.all().map((item) => {
 });
 """
 
+PARSE_ARGS_GLUE = """
+
+// ---------------------------------------------------------------------------
+//   источник: builds/02-lead-widget/estimate-input.js
+//
+// Всё, что приходит сюда, придумала языковая модель по фразе живого человека.
+// Это граница доверия, а не приведение типов.
+// ---------------------------------------------------------------------------
+return $input.all().map((item) => {
+  const parsed = parseEstimateArgs(item.json);
+  return {
+    json: {
+      ...parsed.value,
+      session_id: String(item.json.session_id || ''),
+      args_ok: parsed.ok,
+      missing: parsed.missing,
+      missing_text: parsed.missing.join('; '),
+      notes: parsed.notes,
+      has_address: Boolean(parsed.value.address),
+    },
+  };
+});
+"""
+
+CHECK_ADDRESS_GLUE = """
+
+// ---------------------------------------------------------------------------
+//   источник: builds/02-lead-widget/address.js
+//
+// Узел HTTP заменяет элемент ответом DaData, поэтому разобранные аргументы
+// забираем обратно из узла разбора, а не из $json.
+// ---------------------------------------------------------------------------
+const args = $('Parse Estimate Args').first().json;
+
+return $input.all().map((item) => {
+  const verdict = interpretAddress(item.json);
+  return {
+    json: {
+      ...args,
+      address_ok: verdict.ok,
+      address_degraded: verdict.degraded,
+      address_reason: verdict.reason,
+      address_ask: verdict.ask,
+      address_clean: verdict.address,
+    },
+  };
+});
+"""
+
+COMPUTE_GLUE = """
+
+// ---------------------------------------------------------------------------
+//   источник: builds/02-lead-widget/pricing.js
+//
+// Тот же модуль, что вызывает демо-страница, и те же цифры из прайса.
+// ---------------------------------------------------------------------------
+return $input.all().map((item) => {
+  const a = item.json;
+  const r = estimate({
+    configuration: a.configuration,
+    glazing: a.glazing,
+    profileTier: a.profileTier,
+    topFloor: a.topFloor,
+    extension: a.extension,
+  });
+
+  const lines = [
+    `**${formatRange(r)}**`,
+    '',
+    `${r.configurationLabel}, ${r.glazing === 'warm' ? 'тёплое остекление' : 'холодное остекление'}`,
+    '',
+    'Что входит:',
+    ...r.includes.map((x) => `- ${x}`),
+    '',
+    `Не входит: ${r.excludes.join(', ')}.`,
+  ];
+
+  if (r.assumptions.length) {
+    lines.push('', 'Допущения:', ...r.assumptions.map((x) => `- ${x}`));
+  }
+  if (a.address_degraded && a.has_address) {
+    lines.push('', '_Адрес проверить не удалось — замерщик уточнит его при звонке._');
+  }
+  lines.push(
+    '',
+    'Это **вилка, а не смета**. Точную цену назовёт замерщик на объекте — заочно её не знает никто.'
+  );
+
+  return {
+    json: {
+      ...a,
+      ok: true,
+      price_low: r.low,
+      price_high: r.high,
+      price_text: formatRange(r),
+      estimate_json: JSON.stringify(r),
+      reply: lines.join('\n'),
+    },
+  };
+});
+"""
+
 CODE_NODES = {
     "Normalize Web Request": ("normalize-web.js", NORMALIZE_GLUE),
     "Check Rate Limit": ("rate-limit.js", RATE_LIMIT_GLUE),
+}
+
+ESTIMATE_CODE_NODES = {
+    "Parse Estimate Args": ("estimate-input.js", PARSE_ARGS_GLUE),
+    "Check Address": ("address.js", CHECK_ADDRESS_GLUE),
+    "Compute Estimate": ("pricing.js", COMPUTE_GLUE),
 }
 
 
@@ -539,25 +654,226 @@ def write_paste_copies(codes):
         (NODE_CODE_DIR / f"{slug}.node.js").write_text(code, encoding="utf-8")
 
 
+def build_estimate():
+    """Подworkflow расчёта. Вызывается агентом как инструмент.
+
+    Порядок ветвлений здесь — это порядок, в котором отказ дешевле:
+    сначала «не хватает данных» (бесплатно), потом «адрес непонятен» (один
+    запрос в DaData), и только потом расчёт. Обратный порядок платил бы за
+    проверку адреса в случаях, когда считать всё равно нечего.
+    """
+    codes = {n: build_code(src, glue) for n, (src, glue) in ESTIMATE_CODE_NODES.items()}
+
+    nodes = [
+        node(
+            "When Executed by Another Workflow",
+            "n8n-nodes-base.executeWorkflowTrigger",
+            1.2,
+            # passthrough, а не описанная схема: аргументы сочиняет модель, и
+            # сверять их обязан наш код, а не маппер n8n. Бриф прямо называет
+            # «let the model define» местом, где такие инструменты ломаются.
+            {"inputSource": "passthrough"},
+            -240,
+            300,
+        ),
+        node("Parse Estimate Args", "n8n-nodes-base.code", 2,
+             {"jsCode": codes["Parse Estimate Args"]}, -20, 300),
+        if_node("Args Complete?", "={{ $json.args_ok }}", BOOL_TRUE, "", 200, 300),
+        node(
+            "Result — Need Details",
+            "n8n-nodes-base.set",
+            3.4,
+            {
+                "mode": "manual",
+                "includeOtherFields": True,
+                "assignments": {"assignments": [
+                    {"id": "ok", "name": "ok", "type": "boolean", "value": False},
+                    {"id": "reply", "name": "reply", "type": "string",
+                     "value": "=Для расчёта не хватает: {{ $json.missing_text }}. "
+                              "Спроси это у человека и вызови расчёт ещё раз."},
+                ]},
+                "options": {},
+            },
+            420,
+            460,
+        ),
+        if_node("Address Given?", "={{ $json.has_address }}", BOOL_TRUE, "", 420, 180),
+        node(
+            "DaData — Clean Address",
+            "n8n-nodes-base.httpRequest",
+            4.2,
+            {
+                "method": "POST",
+                "url": "https://cleaner.dadata.ru/api/v1/clean/address",
+                "authentication": "genericCredentialType",
+                # Custom Auth, а не Header Auth: методу clean нужны ДВА
+                # заголовка — Authorization и X-Secret. Header Auth умеет один,
+                # и второй пришлось бы вписать в workflow, то есть в git.
+                "genericAuthType": "httpCustomAuth",
+                "sendBody": True,
+                "specifyBody": "json",
+                # DaData принимает массив адресов даже для одного адреса.
+                "jsonBody": "={{ JSON.stringify([$json.address]) }}",
+                "options": {},
+            },
+            640,
+            120,
+            {
+                "credentials": {"httpCustomAuth": {"id": "REPLACE_ON_IMPORT",
+                                                   "name": "DaData"}},
+                # DaData лежит — считаем всё равно. Адрес на цену не влияет,
+                # а потерять лид из-за стороннего сервиса — худший исход.
+                "onError": "continueRegularOutput",
+            },
+        ),
+        node("Check Address", "n8n-nodes-base.code", 2,
+             {"jsCode": codes["Check Address"]}, 860, 120),
+        if_node("Address Usable?", "={{ $json.address_ok }}", BOOL_TRUE, "", 1080, 120),
+        node(
+            "Result — Clarify Address",
+            "n8n-nodes-base.set",
+            3.4,
+            {
+                "mode": "manual",
+                "includeOtherFields": True,
+                "assignments": {"assignments": [
+                    {"id": "ok", "name": "ok", "type": "boolean", "value": False},
+                    {"id": "reply", "name": "reply", "type": "string",
+                     "value": "={{ $json.address_ask }}"},
+                ]},
+                "options": {},
+            },
+            1300,
+            0,
+        ),
+        node("Compute Estimate", "n8n-nodes-base.code", 2,
+             {"jsCode": codes["Compute Estimate"]}, 1300, 300),
+        node(
+            "Mark Quoted",
+            "n8n-nodes-base.redis",
+            1,
+            {
+                "operation": "set",
+                "key": "=quoted:{{ $json.session_id }}",
+                "value": "1",
+                "keyType": "string",
+                "expire": True,
+                "ttl": QUOTED_TTL,
+            },
+            1520,
+            300,
+            {
+                "credentials": {"redis": {"id": "REPLACE_ON_IMPORT", "name": "Redis"}},
+                # Не смогли поставить метку — расчёт всё равно показываем.
+                # Человек получит цену, просто форму контактов предложит агент
+                # словами, а не виджет полями.
+                "onError": "continueRegularOutput",
+            },
+        ),
+        node(
+            "Result — Estimate",
+            "n8n-nodes-base.set",
+            3.4,
+            {
+                "mode": "manual",
+                "includeOtherFields": False,
+                "assignments": {"assignments": [
+                    {"id": "ok", "name": "ok", "type": "boolean", "value": True},
+                    {"id": "reply", "name": "reply", "type": "string",
+                     "value": "={{ $('Compute Estimate').first().json.reply }}"},
+                    {"id": "price_low", "name": "price_low", "type": "number",
+                     "value": "={{ $('Compute Estimate').first().json.price_low }}"},
+                    {"id": "price_high", "name": "price_high", "type": "number",
+                     "value": "={{ $('Compute Estimate').first().json.price_high }}"},
+                    {"id": "address", "name": "address", "type": "string",
+                     "value": "={{ $('Compute Estimate').first().json.address_clean?.result || '' }}"},
+                ]},
+                "options": {},
+            },
+            1740,
+            300,
+        ),
+    ]
+
+    connections = {
+        "When Executed by Another Workflow": {
+            "main": [[{"node": "Parse Estimate Args", "type": "main", "index": 0}]]},
+        "Parse Estimate Args": {
+            "main": [[{"node": "Args Complete?", "type": "main", "index": 0}]]},
+        "Args Complete?": {"main": [
+            [{"node": "Address Given?", "type": "main", "index": 0}],
+            [{"node": "Result — Need Details", "type": "main", "index": 0}],
+        ]},
+        "Address Given?": {"main": [
+            [{"node": "DaData — Clean Address", "type": "main", "index": 0}],
+            [{"node": "Compute Estimate", "type": "main", "index": 0}],
+        ]},
+        "DaData — Clean Address": {
+            "main": [[{"node": "Check Address", "type": "main", "index": 0}]]},
+        "Check Address": {
+            "main": [[{"node": "Address Usable?", "type": "main", "index": 0}]]},
+        "Address Usable?": {"main": [
+            [{"node": "Compute Estimate", "type": "main", "index": 0}],
+            [{"node": "Result — Clarify Address", "type": "main", "index": 0}],
+        ]},
+        "Compute Estimate": {"main": [[{"node": "Mark Quoted", "type": "main", "index": 0}]]},
+        "Mark Quoted": {"main": [[{"node": "Result — Estimate", "type": "main", "index": 0}]]},
+    }
+
+    names = {n["name"] for n in nodes}
+    for src, spec in connections.items():
+        assert src in names, f"нет узла-источника: {src}"
+        for kind, branches in spec.items():
+            for branch in branches:
+                for link in branch:
+                    assert link["node"] in names, f"связь в никуда: {src} -> {link['node']}"
+
+    # Каждая ветка обязана чем-то закончиться: инструмент, вернувший пустоту,
+    # заставляет агента выдумывать ответ вместо отказа.
+    terminal = {"Result — Need Details", "Result — Clarify Address", "Result — Estimate"}
+    assert terminal <= names
+    for t in terminal:
+        assert t not in connections, f"терминальный узел {t} куда-то ведёт"
+
+    return {
+        "name": ESTIMATE_WORKFLOW_NAME,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "nodes": nodes,
+        "connections": connections,
+        "pinData": {},
+    }, codes
+
+
 def main() -> int:
     check_only = "--check" in sys.argv
+
     wf, codes = build()
-    rendered = json.dumps(wf, indent=2, ensure_ascii=False) + "\n"
+    est, est_codes = build_estimate()
+    all_codes = {**codes, **est_codes}
+
+    targets = [
+        (OUT, json.dumps(wf, indent=2, ensure_ascii=False) + "\n"),
+        (OUT_ESTIMATE, json.dumps(est, indent=2, ensure_ascii=False) + "\n"),
+    ]
 
     if check_only:
-        if not OUT.exists():
-            print("workflow.json не собран", file=sys.stderr)
-            return 1
-        if OUT.read_text(encoding="utf-8") != rendered:
-            print("workflow.json разошёлся с источниками.", file=sys.stderr)
-            print("Запустите: python3 builds/02-lead-widget/make-workflow.py", file=sys.stderr)
-            return 1
-        print("workflow.json в актуальном состоянии")
+        for path, rendered in targets:
+            if not path.exists():
+                print(f"{path.name} не собран", file=sys.stderr)
+                return 1
+            if path.read_text(encoding="utf-8") != rendered:
+                print(f"{path.name} разошёлся с источниками.", file=sys.stderr)
+                print("Запустите: python3 builds/02-lead-widget/make-workflow.py", file=sys.stderr)
+                return 1
+        print("workflow.json и estimate.workflow.json в актуальном состоянии")
         return 0
 
-    OUT.write_text(rendered, encoding="utf-8")
-    write_paste_copies(codes)
-    print(f"собрано {len(wf['nodes'])} узлов -> {OUT.relative_to(HERE.parents[1])}")
+    for path, rendered in targets:
+        path.write_text(rendered, encoding="utf-8")
+    write_paste_copies(all_codes)
+    print(f"собрано {len(wf['nodes'])} узлов -> {OUT.name}")
+    print(f"собрано {len(est['nodes'])} узлов -> {OUT_ESTIMATE.name}")
     return 0
 
 
