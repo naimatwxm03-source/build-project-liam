@@ -6,9 +6,10 @@
 держит имена узлов в одном месте: переименование ломает сборку здесь, а не в
 рантайме у клиента.
 
-Версии узлов (typeVersion) взяты из рабочего builds/01-receipt-bot/workflow.json,
-который импортируется в этот n8n без ошибок. Не угадывать: неверная версия
-импортируется молча, а падает уже при запуске.
+Версии узлов (typeVersion) не угаданы, а прочитаны: базовые — из рабочего
+builds/01-receipt-bot/workflow.json, langchain-узлы — из исходников n8n по тегу
+n8n@2.36.8. Неверная версия импортируется молча и падает уже при запуске, то
+есть у клиента.
 
     python3 builds/02-lead-widget/make-workflow.py
     python3 builds/02-lead-widget/make-workflow.py --check
@@ -39,6 +40,15 @@ CLIENT_PHONE = "+7 (846) 000-00-00"
 # В диалоговом виджете задержка видна посетителю напрямую.
 MODEL_URI = "gpt://b1gg2h3lj0e41o47fkoo/yandexgpt-lite/latest"
 
+# Модель эмбеддингов ДЛЯ ПОИСКА. У Яндекса они разные и не взаимозаменяемы:
+# text-search-doc индексирует документы, text-search-query обрабатывает запросы.
+# Индексацию делает ingest-kb.py моделью doc, поиск — этот узел моделью query.
+# Перепутать — значит тихо просесть в качестве поиска и потом объяснять клиенту,
+# что «RAG почему-то не работает».
+EMBEDDING_QUERY_URI = "emb://b1gg2h3lj0e41o47fkoo/text-search-query/latest"
+
+QDRANT_COLLECTION = "kb_demo_balkon"
+
 # Системный промпт. Растёт по мере появления инструментов: на шаге B2 расчёта
 # ещё нет, поэтому промпт ПРЯМО ЗАПРЕЩАЕТ называть цифры. Промпт, обещающий
 # калькулятор, которого нет, — это инструкция галлюцинировать.
@@ -54,14 +64,21 @@ SYSTEM_PROMPT = """Ты — консультант компании по ост�
 Это не стилистика. Четыре вопроса сразу превращают разговор в анкету, а анкету
 человек закрывает. Ради этого правила всё и строилось.
 
-=== НЕ ВЫДУМЫВАЙ ===
-Цены, сроки, гарантии, условия рассрочки, состав работ — если этого нет в том,
-что тебе дали, честно скажи, что уточнишь, и предложи связать с менеджером.
-Выдуманная цифра всплывёт при первом же звонке конкуренту и будет стоить
-компании сделки.
+=== ТОЛЬКО ИЗ БАЗЫ ЗНАНИЙ ===
+На вопросы о ценах, сроках, гарантии, рассрочке, профилях и составе работ
+отвечай ТОЛЬКО тем, что вернул инструмент knowledge_base. Вызывай его всякий
+раз, когда спрашивают о чём-то из этого списка, даже если кажется, что ответ
+очевиден.
 
-СЕЙЧАС У ТЕБЯ НЕТ ИНСТРУМЕНТА РАСЧЁТА И НЕТ БАЗЫ ЗНАНИЙ. Поэтому конкретных
-цен, сроков и условий ты не называешь вообще. Ни одной цифры.
+Если в базе ответа нет — так и скажи: «этого у меня нет, уточню у менеджера».
+Это нормальный ответ. Выдуманная цифра всплывёт при первом же звонке конкуренту
+и будет стоить компании сделки, а «уточню» не стоит ничего.
+
+Никогда не смешивай найденное с собственными догадками. Если база дала вилку
+цен — назови именно её и скажи, что точная цифра будет после замера.
+
+ПЕРСОНАЛЬНОГО РАСЧЁТА У ТЕБЯ ПОКА НЕТ. Общие цены из базы называть можно,
+считать стоимость под конкретный балкон — нельзя.
 
 === ЧТО ВЫЯСНИТЬ, В ЭТОМ ПОРЯДКЕ ===
 Спрашивай по одному пункту за сообщение. Если человек назвал что-то сам —
@@ -338,6 +355,51 @@ def build():
             520,
             {"credentials": {"redis": {"id": "REPLACE_ON_IMPORT", "name": "Redis"}}},
         ),
+        node(
+            # ИМЯ УЗЛА = ИМЯ ИНСТРУМЕНТА. С версии 1.3 поле toolName убрано, и
+            # агент видит инструмент под именем узла. Поэтому имя техническое,
+            # а не «База знаний»: его читает модель, а не человек.
+            "knowledge_base",
+            "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+            1.3,
+            {
+                "mode": "retrieve-as-tool",
+                "toolDescription": (
+                    "База знаний компании по остеклению балконов: цены, сроки, "
+                    "гарантия, рассрочка, профили, что входит и не входит в "
+                    "стоимость, подготовка к монтажу. Вызывай при ЛЮБОМ вопросе "
+                    "об условиях или ценах."
+                ),
+                "qdrantCollection": {
+                    "__rl": True,
+                    "mode": "list",
+                    "value": QDRANT_COLLECTION,
+                    "cachedResultName": QDRANT_COLLECTION,
+                },
+                "topK": 4,
+                "includeDocumentMetadata": True,
+                "useReranker": False,
+                "options": {},
+            },
+            1420,
+            520,
+            {"credentials": {"qdrantApi": {"id": "REPLACE_ON_IMPORT", "name": "Qdrant"}}},
+        ),
+        node(
+            "Embeddings — Yandex (query)",
+            "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+            1.2,
+            {
+                # С версии 1.2 поле Base URL у этого узла СКРЫТО: адрес берётся
+                # из креденшела. У «Yandex AI Studio» он уже прописан с Build 1.
+                "model": EMBEDDING_QUERY_URI,
+                "options": {},
+            },
+            1620,
+            700,
+            {"credentials": {"openAiApi": {"id": "REPLACE_ON_IMPORT",
+                                           "name": "Yandex AI Studio"}}},
+        ),
         reply_node(
             "Reply — Agent",
             "={{ $json.output || " + json.dumps(HANDOVER_REPLY, ensure_ascii=False) + " }}",
@@ -393,6 +455,14 @@ def build():
         "Chat Memory": {
             "ai_memory": [[{"node": "Lead Agent", "type": "ai_memory", "index": 0}]]
         },
+        "knowledge_base": {
+            "ai_tool": [[{"node": "Lead Agent", "type": "ai_tool", "index": 0}]]
+        },
+        "Embeddings — Yandex (query)": {
+            "ai_embedding": [
+                [{"node": "knowledge_base", "type": "ai_embedding", "index": 0}]
+            ]
+        },
         "Reply — Agent": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
         "Reply — Rate Limited": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
         "Reply — Invalid": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
@@ -419,8 +489,21 @@ def build():
         for link in branch
         if link["node"] == "Lead Agent"
     }
-    for required in ("ai_languageModel", "ai_memory"):
+    for required in ("ai_languageModel", "ai_memory", "ai_tool"):
         assert required in incoming, f"к Lead Agent не подключено: {required}"
+
+    # У хранилища в режиме retrieve-as-tool обязан быть вход эмбеддингов.
+    # Без него узел импортируется, но падает при первом же вызове инструмента —
+    # то есть ровно тогда, когда посетитель задаст первый вопрос по существу.
+    kb_incoming = {
+        kind
+        for spec in connections.values()
+        for kind, branches in spec.items()
+        for branch in branches
+        for link in branch
+        if link["node"] == "knowledge_base"
+    }
+    assert "ai_embedding" in kb_incoming, "к knowledge_base не подключены эмбеддинги"
 
     return {
         "name": WORKFLOW_NAME,
