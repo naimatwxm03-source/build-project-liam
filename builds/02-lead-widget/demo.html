@@ -1,0 +1,134 @@
+<title>Расчёт остекления балкона</title>
+<meta name="description" content="Демонстрация чат-виджета: посетитель получает цену за минуту, компания получает лид с расчётом.">
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#ffffff; --ink:#14171c; --muted:#5c6370;
+    --line:#e4e7ec; --accent:#1f6feb; --accent-soft:#eaf1fe; --warn:#8a6100; --warn-bg:#fff8e3;
+  }
+  body{background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0}
+  .wrap{max-width:1000px;margin:0 auto;padding-block:0 72px;padding-left:20px;padding-right:20px}
+
+  .banner{background:var(--warn-bg);color:var(--warn);border-bottom:1px solid #f0e2b8;font-size:13.5px}
+  .banner div{max-width:1000px;margin:0 auto;padding:10px 20px}
+  .banner b{color:#6b4b00}
+
+  header.site{display:flex;align-items:center;gap:14px;padding-block:22px;flex-wrap:wrap}
+  .logo{font-weight:700;font-size:19px;letter-spacing:-.02em}
+  .logo span{color:var(--accent)}
+  header.site .tel{margin-left:auto;font-weight:600;white-space:nowrap}
+  header.site .tel small{display:block;font-weight:400;font-size:12px;color:var(--muted)}
+
+  .hero{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:38px 34px;margin-top:8px}
+  .hero h1{margin:0 0 14px;font-size:clamp(26px,4.4vw,40px);line-height:1.15;letter-spacing:-.02em}
+  .hero p.lead{margin:0 0 26px;font-size:clamp(16px,2vw,18px);color:var(--muted);max-width:56ch}
+  .cta{display:inline-flex;align-items:center;gap:9px;background:var(--accent);color:#fff;border:0;
+       border-radius:11px;padding:13px 22px;font:inherit;font-size:16px;font-weight:600;cursor:pointer}
+  .cta:hover{background:#1a5fd0}
+  .hint{margin:14px 0 0;font-size:13.5px;color:var(--muted)}
+
+  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-top:20px}
+  .fact{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+  .fact b{display:block;font-size:25px;letter-spacing:-.02em;margin-bottom:4px}
+  .fact span{font-size:14px;color:var(--muted)}
+
+  h2{font-size:22px;letter-spacing:-.01em;margin:44px 0 14px}
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
+  .card h3{margin:0 0 8px;font-size:16px}
+  .card p{margin:0;font-size:14.5px;color:var(--muted)}
+
+  .try{background:var(--accent-soft);border:1px solid #cfe0fc;border-radius:14px;padding:22px;margin-top:14px}
+  .try h3{margin:0 0 10px;font-size:16px}
+  .try ul{margin:0;padding-left:20px;font-size:14.5px;color:#33465f}
+  .try li{margin:5px 0}
+  .try code{background:#fff;border:1px solid #cfe0fc;border-radius:5px;padding:1px 6px;font-size:13px}
+
+  footer{margin-top:46px;padding-top:22px;border-top:1px solid var(--line);font-size:13.5px;color:var(--muted)}
+  footer a{color:var(--accent)}
+  @media(max-width:600px){.hero{padding:26px 20px}}
+</style>
+
+<div class="banner"><div>
+  <b>Демонстрация.</b> Заявки никуда не отправляются, телефоны не сохраняются.
+  Компании «Балкон 63» не существует — но <b>цены в расчёте настоящие</b>, из опубликованного
+  прайса самарского подрядчика.
+</div></div>
+
+<div class="wrap">
+  <header class="site">
+    <div class="logo">Балкон<span>63</span></div>
+    <div class="tel">+7 (846) 000-00-00<small>ежедневно 8:00 – 21:00</small></div>
+  </header>
+
+  <section class="hero">
+    <h1>Узнайте цену остекления<br>за минуту — без звонка</h1>
+    <p class="lead">
+      Ответьте на два вопроса в чате и получите вилку стоимости с расшифровкой:
+      что входит, что не входит и от чего зависит цифра.
+    </p>
+    <button class="cta" id="open">Рассчитать стоимость</button>
+    <p class="hint">Телефон спрашиваем <b>только после</b> того, как показали расчёт.</p>
+  </section>
+
+  <div class="facts">
+    <div class="fact"><b>от 13 890 ₽</b><span>холодное остекление лоджии под ключ</span></div>
+    <div class="fact"><b>5–9 дней</b><span>изготовление и монтаж</span></div>
+    <div class="fact"><b>0 %</b><span>рассрочка до 12 месяцев</span></div>
+    <div class="fact"><b>бесплатно</b><span>замер в день обращения</span></div>
+  </div>
+
+  <h2>Что это за страница</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>Виджет, а не встраиваемый чат n8n</h3>
+      <p>Один тег <code>&lt;script&gt;</code> на сайте клиента. Shadow DOM — вёрстка сайта не ломает
+      виджет, а виджет не ломает сайт. Маркетологи перекрашивают страницу через неделю после запуска.</p>
+    </div>
+    <div class="card">
+      <h3>Расчёт из прайса, а не из головы</h3>
+      <p>Вилка считается по матрице «профиль × конфигурация» из реального опубликованного прайса.
+      Каждая цифра записана в <code>PRICING-SOURCES.md</code> со ссылкой и датой.</p>
+    </div>
+    <div class="card">
+      <h3>Сначала польза, потом телефон</h3>
+      <p>Форма контактов физически не появляется, пока сервер не отдал расчёт. Это решение сервера,
+      а не вёрстки — значит, его нельзя сломать правкой стилей.</p>
+    </div>
+    <div class="card">
+      <h3>152-ФЗ с первого дня</h3>
+      <p>Кнопка «Отправить» заблокирована, пока не отмечено согласие на обработку персональных
+      данных. Телефон без согласия не собирается.</p>
+    </div>
+  </div>
+
+  <h2>Попробуйте</h2>
+  <div class="try">
+    <h3>Что спросить у бота</h3>
+    <ul>
+      <li><code>сколько стоит остеклить балкон 3 метра</code> — пройдёт по вопросам и покажет вилку</li>
+      <li><code>какая гарантия</code> · <code>что входит в стоимость</code> · <code>есть рассрочка?</code> — ответы из базы знаний</li>
+      <li><code>лоджия 6 метров, тёплое, премиум, последний этаж</code> — всё сразу, расчёт в один ход</li>
+    </ul>
+  </div>
+
+  <footer>
+    <p><b>Чем демо отличается от боевой версии.</b> Здесь диалог ведёт сценарий по ключевым словам,
+    чтобы страница работала без сервера. На проде фразу целиком понимает AI-агент в n8n
+    (Yandex AI Studio), отвечает из базы знаний в Qdrant, вызывает расчёт как подworkflow и создаёт
+    лид в Bitrix24. <b>Логика цен одна и та же</b> — вызывается тот же <code>pricing.js</code>.</p>
+    <p>NXAI Automation · <a href="https://github.com/naimatwxm03-source/build-project-liam">исходный код</a></p>
+  </footer>
+</div>
+
+<script src="pricing.js"></script>
+<script src="demo-engine.js"></script>
+<script src="widget/widget.js"
+        data-title="Балкон 63"
+        data-subtitle="Расчёт стоимости за минуту"
+        data-phone="+7 (846) 000-00-00"
+        data-accent="#1f6feb"></script>
+<script>
+  document.getElementById('open').addEventListener('click', function () {
+    window.NXAIWidget.open();
+  });
+</script>
