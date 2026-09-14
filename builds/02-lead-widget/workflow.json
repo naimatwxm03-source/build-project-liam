@@ -1,0 +1,369 @@
+{
+  "name": "02 Lead Widget — Chat",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "https://n-enterprise.ru,https://www.n-enterprise.ru"
+        }
+      },
+      "id": "widget-webhook",
+      "name": "Widget Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -220,
+        300
+      ],
+      "webhookId": "REPLACE_ON_IMPORT"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Приведение запроса виджета к общему конверту.\n *\n * Конверт тот же, что у VK-адаптера (builds/vk-adapter/normalize-vk.js):\n * channel, user_id, session_key, text, ts. Это не лишняя работа — благодаря\n * одинаковому конверту один и тот же агент обслужит и сайт, и VK, и Авито,\n * а добавление канала станет новым адаптером, а не переписыванием сборки.\n *\n * У веб-канала нет user_id, поэтому session_id играет обе роли. Он приходит\n * из браузера, то есть управляем снаружи — значит всё, что на нём завязано,\n * должно быть безвредно при подделке. Чужая память — это чужой разговор об\n * остеклении, не более; лимит считается по тому же ключу, поэтому подделка\n * не даёт обхода, а лишь делит чужую квоту.\n */\n'use strict';\n\nconst MAX_TEXT = 2000; // человек столько не пишет; отсекаем вставленную простыню\nconst MAX_NAME = 120;\nconst MAX_PHONE = 32;\n\n/**\n * Выбрасывает управляющие символы и обрезает по длине.\n *\n * Посимвольно, а не регуляркой с диапазоном: диапазон управляющих символов\n * приходится записывать escape-последовательностями, которые невидимы при\n * ревью и легко ломаются при копировании. Здесь условие видно глазами.\n */\nfunction clean(value, max) {\n  if (value == null) return '';\n  const s = String(value);\n  let out = '';\n  for (let i = 0; i < s.length; i++) {\n    const code = s.charCodeAt(i);\n    if (code < 32 || code === 127) continue;\n    out += s[i];\n  }\n  return out.trim().slice(0, max);\n}\n\n/** Телефон нужен менеджеру, а не парсеру: храним как есть, сверяем только длину. */\nfunction phoneDigits(raw) {\n  return clean(raw, MAX_PHONE).replace(/\\D/g, '').length;\n}\n\nfunction normalizeWebRequest(body) {\n  const b = body && typeof body === 'object' ? body : {};\n  const sessionId = clean(b.session_id, 64);\n  const contact = b.contact && typeof b.contact === 'object' ? b.contact : null;\n\n  const envelope = {\n    channel: 'web',\n    session_id: sessionId,\n    user_id: sessionId,\n    session_key: sessionId ? 'web:' + sessionId : '',\n    text: clean(b.message, MAX_TEXT),\n    ts: new Date().toISOString(),\n    is_contact: false,\n    contact_name: '',\n    contact_phone: '',\n    contact_consent: false,\n    valid: false,\n    invalid_reason: '',\n  };\n\n  if (!sessionId) {\n    envelope.invalid_reason = 'нет session_id';\n    return envelope;\n  }\n\n  if (contact) {\n    envelope.is_contact = true;\n    envelope.contact_name = clean(contact.name, MAX_NAME);\n    envelope.contact_phone = clean(contact.phone, MAX_PHONE);\n    envelope.contact_consent = contact.consent === true;\n\n    // 152-ФЗ. Галочка проверяется и в виджете, и здесь. Клиентскую проверку\n    // обойдёт любой, кто открыл консоль; серверную — нет. Телефон без согласия\n    // не сохраняется, и это не обсуждается.\n    if (!envelope.contact_consent) {\n      envelope.invalid_reason = 'нет согласия на обработку персональных данных';\n      return envelope;\n    }\n    if (phoneDigits(envelope.contact_phone) < 10) {\n      envelope.invalid_reason = 'телефон короче 10 цифр';\n      return envelope;\n    }\n    envelope.valid = true;\n    return envelope;\n  }\n\n  if (!envelope.text) {\n    envelope.invalid_reason = 'пустое сообщение';\n    return envelope;\n  }\n\n  envelope.valid = true;\n  return envelope;\n}\n\n// ---------------------------------------------------------------------------\n// Склейка с n8n. Всё выше внедряется из normalize-web.js генератором\n// make-workflow.py. Не править здесь — править источник и перегенерировать.\n// ---------------------------------------------------------------------------\nreturn $input.all().map((item) => ({\n  json: normalizeWebRequest(item.json.body !== undefined ? item.json.body : item.json),\n}));\n"
+      },
+      "id": "normalize-web-request",
+      "name": "Normalize Web Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid-request?",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "valid-request?",
+      "name": "Valid Request?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "incr",
+        "key": "=rl:{{ $json.session_id }}",
+        "expire": true,
+        "ttl": 600
+      },
+      "id": "rate-limit",
+      "name": "Rate Limit",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        440,
+        200
+      ],
+      "credentials": {
+        "redis": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Redis"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Разбор ответа Redis INCR и решение по лимиту запросов.\n *\n * Виджет стоит на чужом сайте и открыт всему интернету. Без лимита один\n * человек с консолью браузера за ночь выставляет клиенту счёт за Yandex AI\n * Studio. Поэтому лимит — часть сборки, а не опция.\n *\n * Почему не читаем ответ Redis напрямую: узел Redis в n8n кладёт результат\n * INCR под именем ключа, а ключ у нас собирается выражением. Полагаться на\n * форму ответа — значит однажды получить `undefined > 20 === false` и молча\n * остаться без защиты, ничего при этом не заметив. Берём первое числовое\n * значение, какой бы ни была обёртка.\n */\n'use strict';\n\nconst WINDOW_SECONDS = 600; // 10 минут — обязано совпадать с TTL в узле Redis\nconst MAX_MESSAGES = 20;\n\nfunction readCount(redisJson) {\n  if (redisJson == null) return null;\n  if (typeof redisJson === 'number') return Number.isFinite(redisJson) ? redisJson : null;\n  if (typeof redisJson === 'string') return /^\\d+$/.test(redisJson.trim()) ? Number(redisJson.trim()) : null;\n  if (typeof redisJson !== 'object') return null;\n  for (const v of Object.values(redisJson)) {\n    if (typeof v === 'number' && Number.isFinite(v)) return v;\n    if (typeof v === 'string' && /^\\d+$/.test(v.trim())) return Number(v.trim());\n  }\n  return null;\n}\n\n/**\n * Если Redis недоступен или ответил непонятно — пропускаем запрос.\n *\n * Это осознанный выбор в пользу доступности. Отказать всем посетителям сайта\n * из-за сбоя вспомогательного сервиса дороже, чем на несколько минут остаться\n * без лимита: первое стоит клиенту всех лидов, второе — нескольких рублей.\n * Но факт помечается флагом, чтобы в логе исполнения было видно, что защита\n * не сработала, а не казалось, что всё в порядке.\n */\nfunction decide(count) {\n  if (count == null) {\n    return { rate_count: null, rate_limited: false, rate_degraded: true };\n  }\n  return { rate_count: count, rate_limited: count > MAX_MESSAGES, rate_degraded: false };\n}\n\nfunction limitReply() {\n  return 'Слишком много сообщений подряд — сделайте паузу на пару минут.\\n\\n' +\n    'Если вопрос срочный, позвоните напрямую: так быстрее.';\n}\n\n// ---------------------------------------------------------------------------\n//   источник: builds/02-lead-widget/rate-limit.js\n//\n// Узел Redis подменяет элемент своим ответом, поэтому конверт берём обратно из\n// узла нормализации, а не из $json — иначе session_id потеряется ровно здесь.\n// ---------------------------------------------------------------------------\nconst envelope = $('Normalize Web Request').first().json;\n\nreturn $input.all().map((item) => {\n  const verdict = decide(readCount(item.json));\n  return {\n    json: {\n      ...envelope,\n      ...verdict,\n      reply: verdict.rate_limited ? limitReply() : '',\n    },\n  };\n});\n"
+      },
+      "id": "check-rate-limit",
+      "name": "Check Rate Limit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "rate-limited?",
+              "leftValue": "={{ $json.rate_limited }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "rate-limited?",
+      "name": "Rate Limited?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "reply",
+              "name": "reply",
+              "type": "string",
+              "value": "={{ $json.reply }}"
+            },
+            {
+              "id": "form",
+              "name": "form",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "reply---rate-limited",
+      "name": "Reply — Rate Limited",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "reply",
+              "name": "reply",
+              "type": "string",
+              "value": "=Приняли: «{{ $json.text }}». Агент подключается на следующем шаге сборки."
+            },
+            {
+              "id": "form",
+              "name": "form",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "reply---placeholder",
+      "name": "Reply — Placeholder",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "reply",
+              "name": "reply",
+              "type": "string",
+              "value": "=Не получилось обработать запрос: {{ $json.invalid_reason }}"
+            },
+            {
+              "id": "form",
+              "name": "form",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "reply---invalid",
+      "name": "Reply — Invalid",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        440,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ session_id: $json.session_id, reply: $json.reply, form: $json.form || '' }) }}",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Widget Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Web Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Web Request": {
+      "main": [
+        [
+          {
+            "node": "Valid Request?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Request?": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply — Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limit": {
+      "main": [
+        [
+          {
+            "node": "Check Rate Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Rate Limit": {
+      "main": [
+        [
+          {
+            "node": "Rate Limited?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limited?": {
+      "main": [
+        [
+          {
+            "node": "Reply — Rate Limited",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply — Placeholder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply — Rate Limited": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply — Placeholder": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply — Invalid": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
