@@ -1,5 +1,10 @@
 # 00 — Error alerts to VK
 
+**Status: live and tested 2026-09-14.** Breaking the Vision OCR URL on purpose
+produced, within seconds: workflow name, `Узел: Yandex Vision OCR`, the error
+text, and a link to the failed execution. Restored afterwards and confirmed
+normal.
+
 A failure nobody hears about is worse than a failure, because the client finds
 it before you do. This workflow is the difference between a demo and something
 you can put a client's name on.
