@@ -174,6 +174,72 @@
     },
     {
       "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "options": {
+          "systemMessage": "Ты — консультант компании по остеклению балконов в Самаре. Общаешься в чате на сайте.\n\nГЛАВНОЕ ПРАВИЛО: не выдумывай ничего. Цены, сроки, гарантии, условия рассрочки, состав работ — если этого нет в том, что тебе дали, скажи честно, что уточнишь, и предложи связать с менеджером. Выдуманная цифра всплывёт при первом звонке конкуренту и будет стоить компании сделки.\n\nСЕЙЧАС У ТЕБЯ НЕТ ИНСТРУМЕНТА РАСЧЁТА И НЕТ БАЗЫ ЗНАНИЙ. Поэтому конкретных цен, сроков и условий ты не называешь вообще. Ни одной цифры. Вместо этого выясняй параметры объекта и говори, что расчёт покажешь следом.\n\nЧто нужно выяснить для расчёта, по одному вопросу за раз, а не анкетой:\n1. конфигурация балкона: прямой примерно 3 метра, П-образный или лоджия 6 метров\n2. тип остекления: тёплое или холодное\n3. этаж (на последнем нужна крыша)\n4. нужен ли вынос\n\nОбъясняй разницу простыми словами, если спрашивают. Тёплое — чтобы пользоваться балконом зимой как комнатой. Холодное — закрыть от пыли, дождя и ветра.\n\nТелефон не спрашивай. Его спросит система после того, как покажет расчёт: просить контакт раньше, чем дал человеку пользу, — верный способ его потерять.\n\nТон: коротко, по-человечески, без канцелярита. Два-три предложения на реплику. Ты не робот-анкета."
+        }
+      },
+      "id": "lead-agent",
+      "name": "Lead Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1100,
+        320
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt://b1gg2h3lj0e41o47fkoo/yandexgpt-lite/latest"
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "yandexgpt-lite-(yandex-ai-studio)",
+      "name": "YandexGPT Lite (Yandex AI Studio)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1020,
+        520
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Yandex AI Studio"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Normalize Web Request').first().json.session_key }}",
+        "sessionTTL": 2592000,
+        "contextWindowLength": 10
+      },
+      "id": "chat-memory",
+      "name": "Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryRedisChat",
+      "typeVersion": 1.6,
+      "position": [
+        1220,
+        520
+      ],
+      "credentials": {
+        "redis": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Redis"
+        }
+      }
+    },
+    {
+      "parameters": {
         "mode": "manual",
         "includeOtherFields": true,
         "assignments": {
@@ -182,7 +248,7 @@
               "id": "reply",
               "name": "reply",
               "type": "string",
-              "value": "=Приняли: «{{ $json.text }}». Агент подключается на следующем шаге сборки."
+              "value": "={{ $json.output || \"Секунду, соединяюсь с менеджером — а пока можно позвонить напрямую: **+7 (846) 000-00-00**\" }}"
             },
             {
               "id": "form",
@@ -194,13 +260,13 @@
         },
         "options": {}
       },
-      "id": "reply---placeholder",
-      "name": "Reply — Placeholder",
+      "id": "reply---agent",
+      "name": "Reply — Agent",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1100,
-        300
+        1340,
+        320
       ]
     },
     {
@@ -245,7 +311,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1340,
+        1560,
         300
       ]
     }
@@ -324,14 +390,47 @@
         ],
         [
           {
-            "node": "Reply — Placeholder",
+            "node": "Lead Agent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Reply — Rate Limited": {
+    "Lead Agent": {
+      "main": [
+        [
+          {
+            "node": "Reply — Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YandexGPT Lite (Yandex AI Studio)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Lead Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Lead Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply — Agent": {
       "main": [
         [
           {
@@ -342,7 +441,7 @@
         ]
       ]
     },
-    "Reply — Placeholder": {
+    "Reply — Rate Limited": {
       "main": [
         [
           {

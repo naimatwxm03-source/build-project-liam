@@ -29,6 +29,53 @@ WORKFLOW_NAME = "02 Lead Widget — Chat"
 # это чужой бесплатный LLM за счёт клиента. Меняется на домен заказчика.
 ALLOWED_ORIGINS = "https://n-enterprise.ru,https://www.n-enterprise.ru"
 
+# Публичный телефон заказчика. Не секрет и намеренно лежит в workflow, а не в
+# переменной окружения: это конфигурация клиента, которую меняют при внедрении,
+# и ради неё не должно требоваться перезапускать контейнер.
+CLIENT_PHONE = "+7 (846) 000-00-00"
+
+# Модель. yandexgpt-lite, а не Qwen: Build 1 показал 40.5с против 17.3с при
+# одинаковой точности, плюс Яндекс накручивает ~30x на китайские модели.
+# В диалоговом виджете задержка видна посетителю напрямую.
+MODEL_URI = "gpt://b1gg2h3lj0e41o47fkoo/yandexgpt-lite/latest"
+
+# Системный промпт. Растёт по мере появления инструментов: на шаге B2 расчёта
+# ещё нет, поэтому промпт ПРЯМО ЗАПРЕЩАЕТ называть цифры. Промпт, обещающий
+# калькулятор, которого нет, — это инструкция галлюцинировать.
+SYSTEM_PROMPT = """Ты — консультант компании по остеклению балконов в Самаре. Общаешься в чате на сайте.
+
+ГЛАВНОЕ ПРАВИЛО: не выдумывай ничего. Цены, сроки, гарантии, условия рассрочки, \
+состав работ — если этого нет в том, что тебе дали, скажи честно, что уточнишь, \
+и предложи связать с менеджером. Выдуманная цифра всплывёт при первом звонке \
+конкуренту и будет стоить компании сделки.
+
+СЕЙЧАС У ТЕБЯ НЕТ ИНСТРУМЕНТА РАСЧЁТА И НЕТ БАЗЫ ЗНАНИЙ. Поэтому конкретных цен, \
+сроков и условий ты не называешь вообще. Ни одной цифры. Вместо этого выясняй \
+параметры объекта и говори, что расчёт покажешь следом.
+
+Что нужно выяснить для расчёта, по одному вопросу за раз, а не анкетой:
+1. конфигурация балкона: прямой примерно 3 метра, П-образный или лоджия 6 метров
+2. тип остекления: тёплое или холодное
+3. этаж (на последнем нужна крыша)
+4. нужен ли вынос
+
+Объясняй разницу простыми словами, если спрашивают. Тёплое — чтобы пользоваться \
+балконом зимой как комнатой. Холодное — закрыть от пыли, дождя и ветра.
+
+Телефон не спрашивай. Его спросит система после того, как покажет расчёт: \
+просить контакт раньше, чем дал человеку пользу, — верный способ его потерять.
+
+Тон: коротко, по-человечески, без канцелярита. Два-три предложения на реплику. \
+Ты не робот-анкета."""
+
+# Что отвечаем, когда модель не ответила. Тупик на лид-форме стоит клиенту сделки,
+# поэтому даже отказ заканчивается телефоном, а не сообщением об ошибке.
+HANDOVER_REPLY = (
+    "Секунду, соединяюсь с менеджером — а пока можно позвонить напрямую: **"
+    + CLIENT_PHONE
+    + "**"
+)
+
 
 # --- код для Code-узлов -------------------------------------------------------
 
@@ -212,12 +259,60 @@ def build():
         ),
         if_node("Rate Limited?", "={{ $json.rate_limited }}", BOOL_TRUE, "", 880, 200),
         reply_node("Reply — Rate Limited", "={{ $json.reply }}", 1100, 100),
-        # B1: заглушка. На шаге B2 сюда встанет AI-агент.
-        reply_node(
-            "Reply — Placeholder",
-            "=Приняли: «{{ $json.text }}». Агент подключается на следующем шаге сборки.",
+        node(
+            "Lead Agent",
+            "@n8n/n8n-nodes-langchain.agent",
+            3.1,
+            {
+                "promptType": "define",
+                "text": "={{ $json.text }}",
+                "options": {"systemMessage": SYSTEM_PROMPT},
+            },
             1100,
-            300,
+            320,
+            # Модель недоступна — посетитель всё равно обязан получить ответ.
+            # Ветка продолжается, а Reply — Agent подставит телефон менеджера.
+            {"onError": "continueRegularOutput"},
+        ),
+        node(
+            "YandexGPT Lite (Yandex AI Studio)",
+            "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+            1.2,
+            {
+                "model": {"__rl": True, "mode": "list", "value": MODEL_URI},
+                # 0.3, а не 0: нужен живой диалог. Фактов модель всё равно не
+                # придумывает — это обеспечено промптом и инструментами, а не
+                # температурой.
+                "options": {"temperature": 0.3},
+            },
+            1020,
+            520,
+            {"credentials": {"openAiApi": {"id": "REPLACE_ON_IMPORT",
+                                           "name": "Yandex AI Studio"}}},
+        ),
+        node(
+            "Chat Memory",
+            "@n8n/n8n-nodes-langchain.memoryRedisChat",
+            1.6,
+            {
+                "sessionIdType": "customKey",
+                # Ключ берём из узла нормализации, а не из $json: подузлы не
+                # разделяют контекст элемента с основной веткой, и $json здесь
+                # окажется пустым. Без ключа все посетители сайта попадают в
+                # один общий разговор — это проверяется тестом на две вкладки.
+                "sessionKey": "={{ $('Normalize Web Request').first().json.session_key }}",
+                "sessionTTL": 2592000,  # 30 дней, как записано в брифе
+                "contextWindowLength": 10,
+            },
+            1220,
+            520,
+            {"credentials": {"redis": {"id": "REPLACE_ON_IMPORT", "name": "Redis"}}},
+        ),
+        reply_node(
+            "Reply — Agent",
+            "={{ $json.output || " + json.dumps(HANDOVER_REPLY, ensure_ascii=False) + " }}",
+            1340,
+            320,
         ),
         reply_node(
             "Reply — Invalid",
@@ -235,7 +330,7 @@ def build():
                 "reply: $json.reply, form: $json.form || '' }) }}",
                 "options": {},
             },
-            1340,
+            1560,
             300,
         ),
     ]
@@ -254,11 +349,22 @@ def build():
         "Rate Limited?": {
             "main": [
                 [{"node": "Reply — Rate Limited", "type": "main", "index": 0}],
-                [{"node": "Reply — Placeholder", "type": "main", "index": 0}],
+                [{"node": "Lead Agent", "type": "main", "index": 0}],
             ]
         },
+        "Lead Agent": {"main": [[{"node": "Reply — Agent", "type": "main", "index": 0}]]},
+        # Подузлы подключаются К агенту, а не от него: связь идёт от модели и
+        # памяти в сторону Lead Agent.
+        "YandexGPT Lite (Yandex AI Studio)": {
+            "ai_languageModel": [
+                [{"node": "Lead Agent", "type": "ai_languageModel", "index": 0}]
+            ]
+        },
+        "Chat Memory": {
+            "ai_memory": [[{"node": "Lead Agent", "type": "ai_memory", "index": 0}]]
+        },
+        "Reply — Agent": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
         "Reply — Rate Limited": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
-        "Reply — Placeholder": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
         "Reply — Invalid": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
     }
 
@@ -267,9 +373,24 @@ def build():
     names = {n["name"] for n in nodes}
     for src, spec in connections.items():
         assert src in names, f"нет узла-источника: {src}"
-        for branch in spec["main"]:
-            for link in branch:
-                assert link["node"] in names, f"связь в никуда: {src} -> {link['node']}"
+        for kind, branches in spec.items():
+            for branch in branches:
+                for link in branch:
+                    assert link["node"] in names, f"связь в никуда: {src} -[{kind}]-> {link['node']}"
+
+    # У агента обязаны быть и модель, и память. Без модели он не запустится
+    # вовсе; без памяти запустится молча и потеряет контекст на второй реплике —
+    # и это заметит уже клиент, а не мы.
+    incoming = {
+        kind
+        for spec in connections.values()
+        for kind, branches in spec.items()
+        for branch in branches
+        for link in branch
+        if link["node"] == "Lead Agent"
+    }
+    for required in ("ai_languageModel", "ai_memory"):
+        assert required in incoming, f"к Lead Agent не подключено: {required}"
 
     return {
         "name": WORKFLOW_NAME,
