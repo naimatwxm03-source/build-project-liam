@@ -1,122 +1,221 @@
 <title>Расчёт остекления балкона</title>
-<meta name="description" content="Демонстрация чат-виджета: посетитель получает цену за минуту, компания получает лид с расчётом.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500&display=swap">
 <style>
   :root{
-    --bg:#f7f8fa; --card:#ffffff; --ink:#14171c; --muted:#5c6370;
-    --line:#e4e7ec; --accent:#1f6feb; --accent-soft:#eaf1fe; --warn:#8a6100; --warn-bg:#fff8e3;
+    --ground:#eef0f2;
+    --surface:#ffffff;
+    --ink:#1a1d21;
+    --muted:#646b75;
+    --line:#d5d9de;
+    --rule:#b9c0c7;
+    --accent:#0b5d5b;
+    --accent-ink:#ffffff;
+    --flag-bg:#fdf6e3;
+    --flag-ink:#6b5415;
+    --flag-line:#e8dbb4;
+
+    --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --cond:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
   }
-  body{background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0}
-  .wrap{max-width:1000px;margin:0 auto;padding-block:0 72px;padding-left:20px;padding-right:20px}
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#15181b;
+      --surface:#1d2125;
+      --ink:#e7eaed;
+      --muted:#98a0aa;
+      --line:#2e343a;
+      --rule:#414a52;
+      --accent:#5fb3ad;
+      --accent-ink:#10201f;
+      --flag-bg:#2a2415;
+      --flag-ink:#d8c48a;
+      --flag-line:#473c1f;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#15181b;
+    --surface:#1d2125;
+    --ink:#e7eaed;
+    --muted:#98a0aa;
+    --line:#2e343a;
+    --rule:#414a52;
+    --accent:#5fb3ad;
+    --accent-ink:#10201f;
+    --flag-bg:#2a2415;
+    --flag-ink:#d8c48a;
+    --flag-line:#473c1f;
+  }
 
-  .banner{background:var(--warn-bg);color:var(--warn);border-bottom:1px solid #f0e2b8;font-size:13.5px}
-  .banner div{max-width:1000px;margin:0 auto;padding:10px 20px}
-  .banner b{color:#6b4b00}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:16px;
+    line-height:1.6;
+    margin:0;
+  }
+  .wrap{max-width:860px;margin:0 auto;padding-left:20px;padding-right:20px;padding-block:0 80px}
 
-  header.site{display:flex;align-items:center;gap:14px;padding-block:22px;flex-wrap:wrap}
-  .logo{font-weight:700;font-size:19px;letter-spacing:-.02em}
-  .logo span{color:var(--accent)}
-  header.site .tel{margin-left:auto;font-weight:600;white-space:nowrap}
-  header.site .tel small{display:block;font-weight:400;font-size:12px;color:var(--muted)}
+  /* ---- demo flag: mono, quiet, unmissable ---- */
+  .flag{background:var(--flag-bg);color:var(--flag-ink);border-bottom:1px solid var(--flag-line);
+        font-family:var(--mono);font-size:12px;line-height:1.55}
+  .flag div{max-width:860px;margin:0 auto;padding:9px 20px}
+  .flag b{font-weight:500}
 
-  .hero{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:38px 34px;margin-top:8px}
-  .hero h1{margin:0 0 14px;font-size:clamp(26px,4.4vw,40px);line-height:1.15;letter-spacing:-.02em}
-  .hero p.lead{margin:0 0 26px;font-size:clamp(16px,2vw,18px);color:var(--muted);max-width:56ch}
-  .cta{display:inline-flex;align-items:center;gap:9px;background:var(--accent);color:#fff;border:0;
-       border-radius:11px;padding:13px 22px;font:inherit;font-size:16px;font-weight:600;cursor:pointer}
-  .cta:hover{background:#1a5fd0}
-  .hint{margin:14px 0 0;font-size:13.5px;color:var(--muted)}
+  /* ---- masthead ---- */
+  .mast{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
+        padding-block:26px 0}
+  .mark{font-family:var(--cond);font-weight:700;font-size:20px;letter-spacing:.01em;text-transform:uppercase}
+  .mark i{font-style:normal;color:var(--accent)}
+  .mast .tel{margin-left:auto;font-family:var(--mono);font-size:14px}
+  .mast .tel span{display:block;font-size:11.5px;color:var(--muted)}
 
-  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-top:20px}
-  .fact{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
-  .fact b{display:block;font-size:25px;letter-spacing:-.02em;margin-bottom:4px}
-  .fact span{font-size:14px;color:var(--muted)}
+  /* ---- section labels: mono caps over a hairline ---- */
+  .lbl{font-family:var(--mono);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;
+       color:var(--muted);border-top:1px solid var(--rule);padding-top:8px;margin:52px 0 18px}
 
-  h2{font-size:22px;letter-spacing:-.01em;margin:44px 0 14px}
-  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
-  .card h3{margin:0 0 8px;font-size:16px}
-  .card p{margin:0;font-size:14.5px;color:var(--muted)}
+  /* ---- hero ---- */
+  .hero{padding-block:34px 6px}
+  h1{font-family:var(--cond);font-weight:700;font-size:clamp(34px,6.2vw,58px);line-height:1.04;
+     letter-spacing:-.015em;margin:0 0 18px;text-wrap:balance}
+  .lead{font-size:clamp(16.5px,2.2vw,19px);color:var(--muted);max-width:52ch;margin:0 0 28px}
+  .cta{display:inline-flex;align-items:center;gap:10px;background:var(--accent);color:var(--accent-ink);
+       border:0;border-radius:2px;padding:14px 26px;font-family:var(--cond);font-size:17px;font-weight:600;
+       letter-spacing:.01em;cursor:pointer;transition:opacity .15s}
+  .cta:hover{opacity:.88}
+  .cta:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+  .cta em{font-style:normal;font-family:var(--mono);font-size:13px;opacity:.75}
+  .under{font-family:var(--mono);font-size:12.5px;color:var(--muted);margin:14px 0 0}
 
-  .try{background:var(--accent-soft);border:1px solid #cfe0fc;border-radius:14px;padding:22px;margin-top:14px}
-  .try h3{margin:0 0 10px;font-size:16px}
-  .try ul{margin:0;padding-left:20px;font-size:14.5px;color:#33465f}
-  .try li{margin:5px 0}
-  .try code{background:#fff;border:1px solid #cfe0fc;border-radius:5px;padding:1px 6px;font-size:13px}
+  /* ---- the matrix: the most convincing thing on the page, because it is real ---- */
+  .scroller{overflow-x:auto;border:1px solid var(--line);background:var(--surface)}
+  table{border-collapse:collapse;width:100%;min-width:440px;font-size:14px}
+  caption{text-align:left;padding:14px 16px 0;font-size:13px;color:var(--muted);caption-side:top}
+  th,td{padding:9px 16px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left;font-family:var(--mono);font-size:13px}
+  thead th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+           color:var(--muted);font-weight:400;vertical-align:bottom;line-height:1.35;white-space:normal}
+  tbody td{font-variant-numeric:tabular-nums;font-family:var(--mono)}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr.edge td{font-weight:500;color:var(--accent)}
+  .src{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin:10px 0 0}
+  .src a{color:inherit}
 
-  footer{margin-top:46px;padding-top:22px;border-top:1px solid var(--line);font-size:13.5px;color:var(--muted)}
+  /* ---- spec list: label / value, dotted leader. not cards. ---- */
+  dl.spec{margin:0;display:grid;gap:0}
+  dl.spec div{display:grid;grid-template-columns:minmax(150px,220px) 1fr;gap:6px 22px;
+              padding:15px 0;border-bottom:1px solid var(--line);align-items:baseline}
+  dl.spec dt{font-family:var(--cond);font-weight:600;font-size:16.5px}
+  dl.spec dd{margin:0;color:var(--muted);font-size:15px}
+  dl.spec dd code{font-family:var(--mono);font-size:13px;background:var(--surface);
+                  border:1px solid var(--line);padding:1px 5px}
+  @media(max-width:560px){dl.spec div{grid-template-columns:1fr}}
+
+  /* ---- prompts to try ---- */
+  ul.try{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+  ul.try li{display:grid;grid-template-columns:1fr;gap:4px;padding:13px 15px;background:var(--surface);
+            border:1px solid var(--line)}
+  ul.try b{font-family:var(--mono);font-size:13.5px;font-weight:500;word-break:break-word}
+  ul.try span{font-size:13.5px;color:var(--muted)}
+
+  footer{margin-top:56px;border-top:1px solid var(--rule);padding-top:20px;font-size:14px;color:var(--muted)}
+  footer p{max-width:62ch}
+  footer b{color:var(--ink);font-weight:500}
   footer a{color:var(--accent)}
-  @media(max-width:600px){.hero{padding:26px 20px}}
+  footer .sig{font-family:var(--mono);font-size:12px;margin-top:22px}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
-<div class="banner"><div>
-  <b>Демонстрация.</b> Заявки никуда не отправляются, телефоны не сохраняются.
-  Компании «Балкон 63» не существует — но <b>цены в расчёте настоящие</b>, из опубликованного
-  прайса самарского подрядчика.
+<div class="flag"><div>
+  <b>ДЕМОНСТРАЦИЯ.</b> Заявки не отправляются, телефоны не сохраняются. Компании «Балкон 63» не
+  существует. <b>Цены в расчёте настоящие</b> — из опубликованного прайса самарского подрядчика.
 </div></div>
 
 <div class="wrap">
-  <header class="site">
-    <div class="logo">Балкон<span>63</span></div>
-    <div class="tel">+7 (846) 000-00-00<small>ежедневно 8:00 – 21:00</small></div>
+  <header class="mast">
+    <div class="mark">Балкон<i>63</i></div>
+    <div class="tel">+7 (846) 000-00-00<span>ежедневно 8:00–21:00</span></div>
   </header>
 
   <section class="hero">
-    <h1>Узнайте цену остекления<br>за минуту — без звонка</h1>
+    <h1>Цена остекления<br>до разговора<br>с менеджером</h1>
     <p class="lead">
-      Ответьте на два вопроса в чате и получите вилку стоимости с расшифровкой:
-      что входит, что не входит и от чего зависит цифра.
+      Два вопроса в чате — и вилка стоимости с расшифровкой: что входит, что не входит
+      и от чего зависит цифра. Телефон спрашиваем после расчёта, а не вместо него.
     </p>
-    <button class="cta" id="open">Рассчитать стоимость</button>
-    <p class="hint">Телефон спрашиваем <b>только после</b> того, как показали расчёт.</p>
+    <button class="cta" id="open">Рассчитать стоимость <em>≈40 сек</em></button>
+    <p class="under">Замер бесплатный · рассрочка 0% до 12 мес · монтаж 7–9 дней</p>
   </section>
 
-  <div class="facts">
-    <div class="fact"><b>от 13 890 ₽</b><span>холодное остекление лоджии под ключ</span></div>
-    <div class="fact"><b>5–9 дней</b><span>изготовление и монтаж</span></div>
-    <div class="fact"><b>0 %</b><span>рассрочка до 12 месяцев</span></div>
-    <div class="fact"><b>бесплатно</b><span>замер в день обращения</span></div>
+  <p class="lbl">Прайс · тёплое остекление «под ключ», ₽</p>
+  <div class="scroller">
+    <table>
+      <caption>Матрица, по которой считает бот. Ни одна цифра не выдумана.</caption>
+      <thead>
+        <tr><th scope="col">Профиль</th><th scope="col">Прямой балкон 3 м</th>
+            <th scope="col">П-образный</th><th scope="col">Лоджия 6 м</th></tr>
+      </thead>
+      <tbody>
+        <tr class="edge"><td>Exprof Externa</td><td>18 050</td><td>26 840</td><td>33 884</td></tr>
+        <tr><td>KBE Engine</td><td>20 062</td><td>30 890</td><td>38 289</td></tr>
+        <tr><td>Exprof Practica</td><td>20 620</td><td>32 350</td><td>40 390</td></tr>
+        <tr><td>Rehau BLITZ New</td><td>20 970</td><td>32 190</td><td>40 250</td></tr>
+        <tr><td>Rehau Thermo</td><td>25 770</td><td>39 490</td><td>49 250</td></tr>
+        <tr><td>KBE Energy</td><td>27 806</td><td>42 170</td><td>52 857</td></tr>
+        <tr><td>Rehau Brilliant</td><td>30 266</td><td>46 370</td><td>57 977</td></tr>
+        <tr class="edge"><td>KBE-88</td><td>36 722</td><td>56 090</td><td>69 909</td></tr>
+      </tbody>
+    </table>
   </div>
+  <p class="src">Выделены границы вилки. Холодное — коэффициент 0,73, выведенный из того же
+  прайса тремя способами. Источник: ООО ГК «Самстрой», balkon63.ru, снято 14.09.2026.</p>
 
-  <h2>Что это за страница</h2>
-  <div class="cols">
-    <div class="card">
-      <h3>Виджет, а не встраиваемый чат n8n</h3>
-      <p>Один тег <code>&lt;script&gt;</code> на сайте клиента. Shadow DOM — вёрстка сайта не ломает
-      виджет, а виджет не ломает сайт. Маркетологи перекрашивают страницу через неделю после запуска.</p>
+  <p class="lbl">Что здесь показано</p>
+  <dl class="spec">
+    <div>
+      <dt>Виджет, а не чат n8n</dt>
+      <dd>Один тег <code>&lt;script&gt;</code> на сайте клиента. Shadow DOM: вёрстка сайта не ломает
+      виджет, виджет не ломает сайт. Маркетологи перекрасят страницу через неделю после запуска.</dd>
     </div>
-    <div class="card">
-      <h3>Расчёт из прайса, а не из головы</h3>
-      <p>Вилка считается по матрице «профиль × конфигурация» из реального опубликованного прайса.
-      Каждая цифра записана в <code>PRICING-SOURCES.md</code> со ссылкой и датой.</p>
+    <div>
+      <dt>Цена из прайса</dt>
+      <dd>Вилка считается по матрице выше. Каждая цифра записана в <code>PRICING-SOURCES.md</code>
+      со ссылкой и датой. Два коэффициента — оценочные, и бот говорит об этом вслух.</dd>
     </div>
-    <div class="card">
-      <h3>Сначала польза, потом телефон</h3>
-      <p>Форма контактов физически не появляется, пока сервер не отдал расчёт. Это решение сервера,
-      а не вёрстки — значит, его нельзя сломать правкой стилей.</p>
+    <div>
+      <dt>Сначала польза</dt>
+      <dd>Форма контактов не появляется, пока сервер не отдал расчёт. Это решение сервера, а не
+      вёрстки, — значит, его нельзя сломать правкой стилей. На это есть тест.</dd>
     </div>
-    <div class="card">
-      <h3>152-ФЗ с первого дня</h3>
-      <p>Кнопка «Отправить» заблокирована, пока не отмечено согласие на обработку персональных
-      данных. Телефон без согласия не собирается.</p>
+    <div>
+      <dt>152-ФЗ с первого дня</dt>
+      <dd>Кнопка «Отправить» заблокирована, пока не отмечено согласие на обработку персональных
+      данных. Телефон без согласия не собирается.</dd>
     </div>
-  </div>
+    <div>
+      <dt>Отказ — не тупик</dt>
+      <dd>Если сервер недоступен, бот отдаёт телефон менеджера и оставляет диалог открытым.
+      Сообщение «произошла ошибка» на лид-форме стоит клиенту сделки.</dd>
+    </div>
+  </dl>
 
-  <h2>Попробуйте</h2>
-  <div class="try">
-    <h3>Что спросить у бота</h3>
-    <ul>
-      <li><code>сколько стоит остеклить балкон 3 метра</code> — пройдёт по вопросам и покажет вилку</li>
-      <li><code>какая гарантия</code> · <code>что входит в стоимость</code> · <code>есть рассрочка?</code> — ответы из базы знаний</li>
-      <li><code>лоджия 6 метров, тёплое, премиум, последний этаж</code> — всё сразу, расчёт в один ход</li>
-    </ul>
-  </div>
+  <p class="lbl">Попробуйте</p>
+  <ul class="try">
+    <li><b>сколько стоит остеклить балкон 3 метра</b><span>проведёт по вопросам и покажет вилку</span></li>
+    <li><b>лоджия 6 метров, тёплое, премиум, последний этаж</b><span>всё сразу — расчёт в один ход</span></li>
+    <li><b>какая гарантия · что входит в стоимость · есть рассрочка</b><span>ответы из базы знаний</span></li>
+  </ul>
 
   <footer>
     <p><b>Чем демо отличается от боевой версии.</b> Здесь диалог ведёт сценарий по ключевым словам,
-    чтобы страница работала без сервера. На проде фразу целиком понимает AI-агент в n8n
-    (Yandex AI Studio), отвечает из базы знаний в Qdrant, вызывает расчёт как подworkflow и создаёт
-    лид в Bitrix24. <b>Логика цен одна и та же</b> — вызывается тот же <code>pricing.js</code>.</p>
-    <p>NXAI Automation · <a href="https://github.com/naimatwxm03-source/build-project-liam">исходный код</a></p>
+    чтобы страница работала без сервера. На проде фразу целиком понимает AI-агент в n8n на
+    Yandex AI Studio, отвечает из базы знаний в Qdrant, вызывает расчёт как отдельный workflow и
+    создаёт лид в Bitrix24. <b>Логика цен одна и та же</b> — вызывается тот же <code>pricing.js</code>,
+    и тест это проверяет.</p>
+    <p class="sig">NXAI Automation · Самара ·
+    <a href="https://github.com/naimatwxm03-source/build-project-liam">исходный код на GitHub</a></p>
   </footer>
 </div>
 
@@ -126,7 +225,7 @@
         data-title="Балкон 63"
         data-subtitle="Расчёт стоимости за минуту"
         data-phone="+7 (846) 000-00-00"
-        data-accent="#1f6feb"></script>
+        data-accent="#0b5d5b"></script>
 <script>
   document.getElementById('open').addEventListener('click', function () {
     window.NXAIWidget.open();
