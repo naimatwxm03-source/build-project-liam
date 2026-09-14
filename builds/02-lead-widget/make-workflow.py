@@ -58,6 +58,10 @@ EMBEDDING_QUERY_URI = "emb://b1gg2h3lj0e41o47fkoo/text-search-query/latest"
 
 QDRANT_COLLECTION = "kb_demo_balkon"
 
+# ID подworkflow расчёта в ЭТОМ экземпляре n8n. На другой инсталляции он другой,
+# и узел-инструмент придётся перевыбрать из выпадающего списка.
+ESTIMATE_WORKFLOW_ID = "uS4PnrfyzBxTT0hd"
+
 # Системный промпт. Растёт по мере появления инструментов: на шаге B2 расчёта
 # ещё нет, поэтому промпт ПРЯМО ЗАПРЕЩАЕТ называть цифры. Промпт, обещающий
 # калькулятор, которого нет, — это инструкция галлюцинировать.
@@ -98,8 +102,18 @@ SYSTEM_PROMPT = """Ты — консультант компании по ост�
 Никогда не смешивай найденное с собственными догадками. Если база дала вилку
 цен — назови именно её и скажи, что точная цифра будет после замера.
 
-ПЕРСОНАЛЬНОГО РАСЧЁТА У ТЕБЯ ПОКА НЕТ. Общие цены из базы называть можно,
-считать стоимость под конкретный балкон — нельзя.
+=== РАСЧЁТ ===
+Как только знаешь конфигурацию балкона И тип остекления — вызывай инструмент
+calc_estimate. Не жди, пока выяснишь всё: этаж и вынос уточняют цифру, но без
+них расчёт тоже работает.
+
+Передавай в инструмент то, что человек сказал, своими словами: «лоджия
+6 метров», «тёплое», «последний этаж». Разбирать их — не твоя работа.
+Адрес передавай, только если человек его назвал сам; не выпрашивай.
+
+Результат инструмента показывай целиком, как он пришёл. Не пересчитывай, не
+округляй, не «уточняй» цифры от себя. Если инструмент вернул ok=false — он
+объяснил, чего не хватает; спроси именно это.
 
 === ЧТО ВЫЯСНИТЬ, В ЭТОМ ПОРЯДКЕ ===
 Спрашивай по одному пункту за сообщение. Если человек назвал что-то сам —
@@ -109,15 +123,16 @@ SYSTEM_PROMPT = """Ты — консультант компании по ост�
 3. этаж — на последнем нужна крыша
 4. нужен ли вынос
 
-Когда всё четыре пункта известны — скажи, что расчёт будет следующим шагом.
+Первых двух пунктов уже достаточно, чтобы вызвать расчёт. Остальные два
+уточняют цифру — спрашивай их, но не держи из-за них человека без цены.
 
 Объясняй разницу простыми словами, если спрашивают. Тёплое — чтобы пользоваться
 балконом зимой как комнатой. Холодное — закрыть от пыли, дождя и ветра.
 
 === ТЕЛЕФОН ===
-Телефон не спрашивай никогда. Его спросит система после того, как покажет
-расчёт. Просить контакт раньше, чем дал человеку пользу, — верный способ
-его потерять.
+Телефон не спрашивай никогда — ни до расчёта, ни после. Форму контактов
+показывает система, и она делает это сама, когда расчёт уже показан.
+Твоё дело — довести до расчёта.
 
 === ТОН ===
 Коротко, по-человечески, без канцелярита. Два-три предложения, потом один
@@ -278,9 +293,33 @@ return $input.all().map((item) => {
 });
 """
 
+FORM_GATE_GLUE = r"""
+
+// ---------------------------------------------------------------------------
+//   источник: builds/02-lead-widget/form-gate.js
+//
+// Узлы Redis и Agent оба подменяют элемент своим выводом, поэтому и конверт,
+// и ответ агента берём по именам узлов, а не из $json.
+// ---------------------------------------------------------------------------
+const envelope = $('Normalize Web Request').first().json;
+const agent = $('Lead Agent').first().json;
+const FALLBACK = __HANDOVER__;
+
+return $input.all().map((item) => {
+  const decided = decideForm({
+    quoted: wasQuoted(item.json, 'quoted'),
+    isContact: envelope.is_contact === true,
+    agentReply: agent.output,
+    fallbackReply: FALLBACK,
+  });
+  return { json: { ...envelope, ...decided } };
+});
+"""
+
 CODE_NODES = {
     "Normalize Web Request": ("normalize-web.js", NORMALIZE_GLUE),
     "Check Rate Limit": ("rate-limit.js", RATE_LIMIT_GLUE),
+    "Decide Form": ("form-gate.js", FORM_GATE_GLUE),
 }
 
 ESTIMATE_CODE_NODES = {
@@ -291,6 +330,7 @@ ESTIMATE_CODE_NODES = {
 
 
 def build_code(source: str, glue: str) -> str:
+    glue = glue.replace("__HANDOVER__", json.dumps(HANDOVER_REPLY, ensure_ascii=False))
     return read_source(source) + glue
 
 
@@ -529,12 +569,63 @@ def build():
             {"credentials": {"openAiApi": {"id": "REPLACE_ON_IMPORT",
                                            "name": "Yandex AI Studio"}}},
         ),
-        reply_node(
-            "Reply — Agent",
-            "={{ $json.output || " + json.dumps(HANDOVER_REPLY, ensure_ascii=False) + " }}",
+        node(
+            # Имя узла = имя инструмента для модели.
+            "calc_estimate",
+            "@n8n/n8n-nodes-langchain.toolWorkflow",
+            2.2,
+            {
+                "description": (
+                    "Считает стоимость остекления балкона и возвращает вилку цен с "
+                    "расшифровкой. Вызывай, как только известны конфигурация балкона "
+                    "и тип остекления. Значения передавай словами человека, как он их "
+                    "назвал."
+                ),
+                "workflowId": {
+                    "__rl": True,
+                    "value": ESTIMATE_WORKFLOW_ID,
+                    "mode": "list",
+                    "cachedResultName": ESTIMATE_WORKFLOW_NAME,
+                },
+                "workflowInputs": {
+                    "mappingMode": "defineBelow",
+                    "value": {
+                        # session_id — из конверта, а не от модели: по нему
+                        # подworkflow ставит метку расчёта, и подмена ключа
+                        # открыла бы форму чужой сессии.
+                        "session_id": "={{ $('Normalize Web Request').first().json.session_id }}",
+                    },
+                    "matchingColumns": [],
+                    "schema": [],
+                    "attemptToConvertTypes": False,
+                    "convertFieldsToString": True,
+                },
+            },
+            1380,
+            520,
+        ),
+        node(
+            "Check Quoted",
+            "n8n-nodes-base.redis",
+            1,
+            {
+                "operation": "get",
+                "propertyName": "quoted",
+                "key": "=quoted:{{ $('Normalize Web Request').first().json.session_id }}",
+                "keyType": "automatic",
+                "options": {},
+            },
             1340,
             320,
+            {
+                "credentials": {"redis": {"id": "REPLACE_ON_IMPORT", "name": "Redis"}},
+                # Redis лёг — ответ агента всё равно доедет до человека,
+                # просто без формы контактов.
+                "onError": "continueRegularOutput",
+            },
         ),
+        node("Decide Form", "n8n-nodes-base.code", 2,
+             {"jsCode": codes["Decide Form"]}, 1560, 320),
         reply_node(
             "Reply — Invalid",
             "=Не получилось обработать запрос: {{ $json.invalid_reason }}",
@@ -551,7 +642,7 @@ def build():
                 "reply: $json.reply, form: $json.form || '' }) }}",
                 "options": {},
             },
-            1560,
+            1780,
             300,
         ),
     ]
@@ -573,7 +664,12 @@ def build():
                 [{"node": "Lead Agent", "type": "main", "index": 0}],
             ]
         },
-        "Lead Agent": {"main": [[{"node": "Reply — Agent", "type": "main", "index": 0}]]},
+        "Lead Agent": {"main": [[{"node": "Check Quoted", "type": "main", "index": 0}]]},
+        "Check Quoted": {"main": [[{"node": "Decide Form", "type": "main", "index": 0}]]},
+        "Decide Form": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
+        "calc_estimate": {
+            "ai_tool": [[{"node": "Lead Agent", "type": "ai_tool", "index": 0}]]
+        },
         # Подузлы подключаются К агенту, а не от него: связь идёт от модели и
         # памяти в сторону Lead Agent.
         "YandexGPT Lite (Yandex AI Studio)": {
@@ -592,7 +688,6 @@ def build():
                 [{"node": "knowledge_base", "type": "ai_embedding", "index": 0}]
             ]
         },
-        "Reply — Agent": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
         "Reply — Rate Limited": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
         "Reply — Invalid": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
     }
@@ -707,10 +802,26 @@ def build_estimate():
             "When Executed by Another Workflow",
             "n8n-nodes-base.executeWorkflowTrigger",
             1.2,
-            # passthrough, а не описанная схема: аргументы сочиняет модель, и
-            # сверять их обязан наш код, а не маппер n8n. Бриф прямо называет
-            # «let the model define» местом, где такие инструменты ломаются.
-            {"inputSource": "passthrough"},
+            # Поля объявлены — иначе инструмент не показывает модели, что
+            # вообще можно передать, и она вызывает расчёт пустым.
+            #
+            # ВСЕ поля строковые, включая этаж. Человек говорит «последний», и
+            # число здесь только выбросило бы это слово. Разбор всё равно делает
+            # наш код: схема сообщает модели, что слать, а не заменяет проверку.
+            {
+                "inputSource": "workflowInputs",
+                "workflowInputs": {
+                    "values": [
+                        {"name": "session_id", "type": "string"},
+                        {"name": "configuration", "type": "string"},
+                        {"name": "glazing", "type": "string"},
+                        {"name": "profile_tier", "type": "string"},
+                        {"name": "floor", "type": "string"},
+                        {"name": "extension", "type": "string"},
+                        {"name": "address", "type": "string"},
+                    ]
+                },
+            },
             -240,
             300,
         ),
