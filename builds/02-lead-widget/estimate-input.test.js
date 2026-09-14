@@ -138,3 +138,22 @@ test('адрес проходит как есть и обрезается по �
   });
   assert.strictEqual(long.value.address.length, 300);
 });
+
+test('заметка про крышу не противоречит расчёту', () => {
+  // Поймано на живом прогоне: «последний» в поле этажа не даёт числа, но даёт
+  // флаг крыши. Расчёт крышу добавлял, а заметка сообщала, что не добавлял.
+  const top = E.parseEstimateArgs({ configuration: 'лоджия', glazing: 'тёплое', floor: 'последний' });
+  assert.strictEqual(top.value.topFloor, true);
+  assert.ok(!top.notes.some((n) => n.includes('крыша')),
+    'крыша посчитана — заметка о её отсутствии лжёт: ' + top.notes.join('; '));
+
+  // А когда этажа действительно нет — заметка нужна.
+  const none = E.parseEstimateArgs({ configuration: 'лоджия', glazing: 'тёплое' });
+  assert.strictEqual(none.value.topFloor, false);
+  assert.ok(none.notes.some((n) => n.includes('крыша')));
+
+  // Обычный этаж: крыши нет, но этаж назван — переспрашивать не о чем.
+  const mid = E.parseEstimateArgs({ configuration: 'лоджия', glazing: 'тёплое', floor: 5 });
+  assert.strictEqual(mid.value.topFloor, false);
+  assert.ok(!mid.notes.some((n) => n.includes('крыша')));
+});
