@@ -96,8 +96,8 @@ Yandex Vision misreads Cyrillic in thermal print: `3` comes back as `З`, `Э` a
 `ООО РАФА3ЛЬ`, and there will be no record it happened.
 
 So the prompt requires amounts and dates **exactly as printed**, apostrophes and
-`=` signs included. A separate deterministic layer repairs them
-(`normalize.js`, 43 tests):
+`=` signs included. A separate deterministic layer repairs them —
+a Code node inside the workflow, covered by 43 tests:
 
 * glyph repair runs on **typed numeric fields only** — total, date, tax ID, card
   mask. Vendor names and addresses are never character-substituted;
@@ -127,17 +127,40 @@ missing row.
 ## Step-by-Step Build Guide
 
 ### 1. VK community and token
-Full procedure in `docs/05-vk-setup.md`. Create the community, issue an access
-token with message permissions, enable Callback API.
+The full procedure is attachment **"3. Настройка ВКонтакте.docx"** — ~15 minutes,
+free, needs only a personal VK account.
+
+One rule from it is worth knowing up front: **the workflow must be published
+BEFORE you press "Подтвердить" in Callback API settings.** Otherwise VK marks
+the address failed and you confirm again from scratch.
 
 **Ground truth for the connection is `groups.getCallbackServers`**
 (`status`: `ok` / `failed` / `wait`), never the n8n UI — n8n looks healthy
 either way.
 
+*(On Telegram there is no handshake, but the publish-before-register ordering
+still applies.)*
+
 ### 2. Two tables, created FROM CSV
-* `expenses` — from `expenses-schema.csv`, then add `items` (String),
-  `items_total` (Number), `items_count` (Number)
-* `processed_events` — from `processed-events-schema.csv`
+Make a CSV with these headers and **create the tables from them** — the columns
+come from the header row:
+
+```
+expenses
+event_id,channel,user_id,vendor,expense_date,total,currency,category,
+confidence,needs_review,review_reason,raw_text
+
+processed_events
+event_id,channel,processed_at
+```
+
+Then add three columns to `expenses`: `items` (String), `items_total` (Number),
+`items_count` (Number).
+
+**Set the column types explicitly — a CSV does not carry them:**
+`total`, `items_total`, `items_count` are **Number**; `needs_review` is
+**Boolean**; everything else **String**. A wrong type does not fail — it
+quietly corrupts. A total stored as text will not add up in a report.
 
 > Importing a CSV **into an existing table** only appends rows — it will not
 > build a schema. Create the table from the CSV.
@@ -199,9 +222,11 @@ What makes it feel instant is answering in 2s and thinking afterwards.
 
 ## Resources
 
-* `1. Журнал сборки.docx` (Build Log) — **read this first.** Everything that
-  broke, why, and the prompt that would have prevented it. These mistakes cost
-  days.
-* `2. Бриф.docx` (Brief) — the brief the workflow was generated from.
-* `4. n8n Workflow.json` — the finished workflow, 33 nodes, ready to import
-  (connect your own credentials).
+* **`1. Журнал сборки.docx`** (Build Log) — **read this first.** Everything
+  that broke, why, and the prompt that would have prevented it. These
+  mistakes cost days.
+* **`2. Бриф.docx`** (Brief) — the brief the workflow was generated from.
+* **`3. Настройка ВКонтакте.docx`** (VK Setup) — community, token, Callback
+  API. You need it at step 1.
+* **`4. n8n Workflow.json`** — the finished workflow, 33 nodes, ready to
+  import (connect your own credentials).
