@@ -79,3 +79,31 @@ test('модель, к которой всё это прицеплено, уме
   assert.ok(!/yandexgpt-lite/.test(uri), `${uri} не умеет вызывать функции — см. Решение 04`);
   assert.ok(/yandexgpt-5\.1|yandexgpt-5-pro|yandexgpt\/rc/.test(uri), uri);
 });
+
+test('оба workflow ссылаются на Error Workflow', () => {
+  // Настройка живёт в settings, а импорт файла перезаписывает settings целиком.
+  // Выставленная руками в UI, она исчезала при каждом импорте — и сборка
+  // оставалась без оповещений ровно тогда, когда в неё вносили изменения.
+  // Ошибка без алерта — это ошибка, о которой узнаёт клиент, а не мы.
+  for (const f of ['workflow.json', 'estimate.workflow.json']) {
+    const w = JSON.parse(fs.readFileSync(path.join(__dirname, f), 'utf8'));
+    assert.ok(w.settings.errorWorkflow, `${f}: errorWorkflow не задан`);
+  }
+});
+
+test('лид пишется в таблицу, а не теряется по дороге', () => {
+  const save = wf.nodes.find((n) => n.name === 'Save Lead');
+  assert.ok(save, 'узел Save Lead пропал');
+  assert.strictEqual(save.parameters.operation, 'insert');
+  // Сбой таблицы не должен отнимать у посетителя подтверждение: строку мы
+  // потом восстановим из Error Workflow, а доверие — нет.
+  assert.strictEqual(save.onError, 'continueRegularOutput');
+});
+
+test('отправка контактов НЕ идёт через агента', () => {
+  // Человек уже нажал «Отправить» — модели тут нечего решать, а любой её
+  // шаг на этом пути это лишний способ потерять телефон.
+  const c = wf.connections['Contact Submission?'].main;
+  assert.deepStrictEqual(c[0].map((x) => x.node), ['Check Quoted — Lead']);
+  assert.deepStrictEqual(c[1].map((x) => x.node), ['Lead Agent']);
+});

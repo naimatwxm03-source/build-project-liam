@@ -80,6 +80,23 @@ ESTIMATE_WORKFLOW_ID = "uS4PnrfyzBxTT0hd"
 # перевыбрать в узле Save Lead.
 LEADS_TABLE_ID = "REPLACE_ON_IMPORT"
 
+# Error Workflow — «00 Error Alerts — VK». ID инстанс-специфичен, как и ID
+# подworkflow расчёта.
+#
+# ПОЧЕМУ ЭТО В ГЕНЕРАТОРЕ, А НЕ РУКАМИ В UI: настройка живёт в settings
+# workflow, а импорт файла перезаписывает settings целиком. Выставленная
+# руками, она молча исчезала при каждом импорте — и сборка оставалась без
+# оповещений ровно тогда, когда в неё вносили изменения, то есть когда
+# оповещения нужнее всего. Ошибка без алерта — это ошибка, о которой узнаёт
+# клиент, а не мы.
+ERROR_WORKFLOW_ID = "tQCVcfYBYNJ4dZMq"
+
+WORKFLOW_SETTINGS = {
+    "executionOrder": "v1",
+    "errorWorkflow": ERROR_WORKFLOW_ID,
+}
+
+
 # Колонки таблицы лидов. Порядок и имена обязаны совпадать с leads-schema.csv:
 # по этому CSV таблица создаётся в n8n, и разъехавшееся имя означает молча
 # пустую колонку в отчёте, который менеджер считает полным.
@@ -1020,7 +1037,7 @@ def build():
     return {
         "name": WORKFLOW_NAME,
         "active": False,
-        "settings": {"executionOrder": "v1"},
+        "settings": dict(WORKFLOW_SETTINGS),
         "nodes": nodes,
         "connections": connections,
         "pinData": {},
@@ -1283,7 +1300,7 @@ def build_estimate():
     return {
         "name": ESTIMATE_WORKFLOW_NAME,
         "active": False,
-        "settings": {"executionOrder": "v1"},
+        "settings": dict(WORKFLOW_SETTINGS),
         "nodes": nodes,
         "connections": connections,
         "pinData": {},
