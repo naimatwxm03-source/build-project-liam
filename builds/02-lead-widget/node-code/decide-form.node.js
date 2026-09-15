@@ -42,6 +42,30 @@ function wasQuoted(redisJson, propertyName) {
 }
 
 /**
+ * Читает метку «заявка уже принята». СТРОГО, в отличие от wasQuoted.
+ *
+ * ПОЧЕМУ ОТДЕЛЬНАЯ ФУНКЦИЯ, А НЕ ПЕРЕИСПОЛЬЗОВАНИЕ wasQuoted: у них
+ * противоположное направление безопасности.
+ *
+ * wasQuoted при сомнении отвечает «да» и перебирает все поля объекта. Для
+ * метки расчёта это правильно: ошибка означает «форма появится на ход позже».
+ *
+ * Для метки заявки «да» при сомнении означает «форма не появится НИКОГДА».
+ * Ровно это и случилось на живой странице: ключа `lead:` в Redis нет, узел
+ * отдаёт дальше ответ агента, wasQuoted находит в нём непустое поле `output`
+ * и решает, что заявка уже принята. Цена показана, а телефон не спрошен.
+ *
+ * Поэтому здесь: считается только явное непустое значение под своим именем.
+ * Ничего не нашли — значит заявки не было.
+ */
+function wasLead(redisJson, propertyName) {
+  if (redisJson == null || typeof redisJson !== 'object') return false;
+  const v = redisJson[propertyName];
+  if (v === undefined || v === null) return false;
+  return String(v).trim() !== '';
+}
+
+/**
  * @param {object} opts
  * @param {boolean} opts.quoted        поставлена ли метка расчёта
  * @param {boolean} opts.isContact     это уже отправка контактов
@@ -89,7 +113,7 @@ const agent = $('Lead Agent').first().json;
 // и человек возвращается в ту же сессию не только сегодня.
 let alreadyLead = false;
 try {
-  alreadyLead = wasQuoted($('Check Lead').first().json, 'already_lead');
+  alreadyLead = wasLead($('Check Lead').first().json, 'already_lead');
 } catch (e) {
   alreadyLead = false;
 }

@@ -103,3 +103,30 @@ test('только явное true закрывает форму по заявк
     assert.strictEqual(r.form, 'contact', JSON.stringify(sneaky));
   }
 });
+
+// --- метка заявки читается СТРОГО -------------------------------------------
+
+test('нет ключа заявки — форма показывается', () => {
+  // Регрессия с живой страницы. Ключа `lead:` нет, узел Redis отдаёт дальше
+  // ответ агента, и permissive-читатель находил в нём непустое поле `output`.
+  // Итог: цена показана, форма не появилась НИКОГДА. Направление безопасности
+  // у этой метки обратное метке расчёта — отсюда отдельная функция.
+  assert.strictEqual(G.wasLead({ output: 'от 34 000 до 70 000 ₽' }, 'already_lead'), false);
+  assert.strictEqual(G.wasLead({ reply: 'что-то', session_id: 'w-1' }, 'already_lead'), false);
+  assert.strictEqual(G.wasLead({}, 'already_lead'), false);
+});
+
+test('метка заявки засчитывается только под своим именем', () => {
+  assert.strictEqual(G.wasLead({ already_lead: '1' }, 'already_lead'), true);
+  assert.strictEqual(G.wasLead({ already_lead: 1 }, 'already_lead'), true);
+  for (const empty of [null, undefined, '', '   ']) {
+    assert.strictEqual(G.wasLead({ already_lead: empty }, 'already_lead'), false,
+      JSON.stringify(empty));
+  }
+});
+
+test('мусор вместо ответа Redis не прячет форму', () => {
+  for (const bad of [null, undefined, 'строка', 42, []]) {
+    assert.strictEqual(G.wasLead(bad, 'already_lead'), false, JSON.stringify(bad));
+  }
+});
