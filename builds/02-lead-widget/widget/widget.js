@@ -229,6 +229,11 @@
       '<div class="form">' +
       '<input type="text" name="name" placeholder="Как вас зовут?" autocomplete="name">' +
       '<input type="tel" name="phone" placeholder="Телефон" autocomplete="tel" inputmode="tel">' +
+      // Address is OPTIONAL and says so. A required address field here would
+      // cost leads from people who will happily give one on the phone — and
+      // the estimate never needed it. It is only here so the surveyor can be
+      // routed without a second call.
+      '<input type="text" name="address" placeholder="Адрес объекта — если знаете" autocomplete="street-address">' +
       '<label class="consent"><input type="checkbox" name="consent">' +
       '<span>Согласен на ' + privacy + ' для обратной связи</span></label>' +
       '<button type="button" disabled>Отправить</button>' +
@@ -236,6 +241,7 @@
 
     var name = foot.querySelector('[name=name]');
     var phone = foot.querySelector('[name=phone]');
+    var address = foot.querySelector('[name=address]');
     var consent = foot.querySelector('[name=consent]');
     var btn = foot.querySelector('button');
 
@@ -249,7 +255,12 @@
 
     btn.addEventListener('click', function () {
       btn.disabled = true;
-      sendContact({ name: name.value.trim(), phone: phone.value.trim(), consent: true });
+      sendContact({
+        name: name.value.trim(),
+        phone: phone.value.trim(),
+        address: address.value.trim(),
+        consent: true,
+      });
     });
   }
 

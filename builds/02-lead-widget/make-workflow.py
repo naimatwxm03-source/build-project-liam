@@ -75,6 +75,22 @@ QDRANT_COLLECTION = "kb_demo_balkon"
 # и узел-инструмент придётся перевыбрать из выпадающего списка.
 ESTIMATE_WORKFLOW_ID = "uS4PnrfyzBxTT0hd"
 
+# ID таблицы лидов в ЭТОМ экземпляре n8n. Как и ID подworkflow расчёта, он
+# инстанс-специфичен: на другой инсталляции таблицу надо создать заново и
+# перевыбрать в узле Save Lead.
+LEADS_TABLE_ID = "REPLACE_ON_IMPORT"
+
+# Колонки таблицы лидов. Порядок и имена обязаны совпадать с leads-schema.csv:
+# по этому CSV таблица создаётся в n8n, и разъехавшееся имя означает молча
+# пустую колонку в отчёте, который менеджер считает полным.
+LEAD_COLUMNS = [
+    "session_id", "created_at", "channel", "name", "phone", "consent",
+    "address_raw", "address_clean", "address_note",
+    "price_low", "price_high", "configuration", "glazing",
+    "needs_review", "review_reason",
+]
+
+
 # ---------------------------------------------------------------------------
 # Как узел-инструмент передаёт аргументы в подworkflow расчёта.
 #
@@ -404,10 +420,75 @@ return $input.all().map((item) => {
 });
 """
 
+CHECK_LEAD_ADDRESS_GLUE = r"""
+// ---------------------------------------------------------------------------
+//   источник: builds/02-lead-widget/address.js
+//
+// Тот же разбор ответа DaData, что и в подworkflow расчёта, но на пути лида.
+// Здесь вердикт НИКОГДА не отменяет запись: он только решает, ляжет ли строка
+// на ручную проверку. Адрес на цену не влияет, а потерять уже отданный
+// телефон из-за плохого адреса — самый дорогой возможный исход.
+// ---------------------------------------------------------------------------
+return $input.all().map((item) => ({ json: { lead_address: interpretAddress(item.json) } }));
+"""
+
+BUILD_LEAD_GLUE = r"""
+// ---------------------------------------------------------------------------
+//   источник: builds/02-lead-widget/lead.js
+//
+// Конверт и метку расчёта берём по именам узлов: и Redis, и HTTP подменяют
+// элемент своим ответом, поэтому $json здесь — это не конверт.
+//
+// Вердикт по адресу может отсутствовать: поле адреса в форме необязательное,
+// и при пустом адресе ветка DaData не выполняется вовсе. Обращение к узлу,
+// который не выполнялся, бросает исключение — отсюда try/catch.
+// ---------------------------------------------------------------------------
+const envelope = $('Normalize Web Request').first().json;
+const CLIENT_PHONE = __CLIENT_PHONE__;
+
+let quotedRaw = null;
+try {
+  const q = $('Check Quoted — Lead').first().json;
+  quotedRaw = q && q.quoted !== undefined ? q.quoted : null;
+} catch (e) {
+  quotedRaw = null;
+}
+
+let addressVerdict = null;
+if (envelope.contact_address) {
+  try {
+    addressVerdict = $('Check Lead Address').first().json.lead_address || null;
+  } catch (e) {
+    addressVerdict = null;
+  }
+}
+
+const built = buildLead({
+  envelope,
+  address: addressVerdict,
+  quoted: parseQuoted(quotedRaw),
+});
+
+return [{
+  json: {
+    session_id: envelope.session_id,
+    lead_ok: built.ok,
+    lead_reason: built.reason,
+    ...(built.row || {}),
+    reply: built.ok
+      ? leadReply(built.row, CLIENT_PHONE)
+      : 'Не получилось сохранить заявку: ' + built.reason +
+        '. Позвоните, пожалуйста, напрямую: **' + CLIENT_PHONE + '**',
+  },
+}];
+"""
+
 CODE_NODES = {
     "Normalize Web Request": ("normalize-web.js", NORMALIZE_GLUE),
     "Check Rate Limit": ("rate-limit.js", RATE_LIMIT_GLUE),
     "Decide Form": ("form-gate.js", FORM_GATE_GLUE),
+    "Check Lead Address": ("address.js", CHECK_LEAD_ADDRESS_GLUE),
+    "Build Lead": ("lead.js", BUILD_LEAD_GLUE),
 }
 
 ESTIMATE_CODE_NODES = {
@@ -419,6 +500,7 @@ ESTIMATE_CODE_NODES = {
 
 def build_code(source: str, glue: str) -> str:
     glue = glue.replace("__HANDOVER__", json.dumps(HANDOVER_REPLY, ensure_ascii=False))
+    glue = glue.replace("__CLIENT_PHONE__", json.dumps(CLIENT_PHONE, ensure_ascii=False))
     return read_source(source) + glue
 
 
@@ -702,6 +784,107 @@ def build():
         ),
         node("Decide Form", "n8n-nodes-base.code", 2,
              {"jsCode": codes["Decide Form"]}, 1560, 320),
+        # --- ветка лида (B9) -------------------------------------------
+        # Отправка контактов не идёт через агента: модели нечего решать, когда
+        # человек уже нажал «Отправить». Прямой путь дешевле по токенам и, что
+        # важнее, не даёт модели ни единого шанса потерять телефон.
+        if_node(
+            "Contact Submission?",
+            "={{ $json.is_contact }}",
+            {"type": "boolean", "operation": "true", "singleValue": True},
+            "",
+            1000,
+            700,
+        ),
+        node(
+            "Check Quoted — Lead",
+            "n8n-nodes-base.redis",
+            1,
+            {
+                "operation": "get",
+                "propertyName": "quoted",
+                "key": "=quoted:{{ $('Normalize Web Request').first().json.session_id }}",
+                "options": {},
+            },
+            1200,
+            700,
+            {"credentials": {"redis": {"id": "REPLACE_ON_IMPORT", "name": "Redis"}},
+             # Redis лёг — лид всё равно пишется, просто без сметы и с пометкой
+             # на ручную проверку. Телефон дороже цифры.
+             "onError": "continueRegularOutput"},
+        ),
+        if_node(
+            "Lead Address Given?",
+            "={{ $('Normalize Web Request').first().json.contact_address }}",
+            {"type": "string", "operation": "notEmpty", "singleValue": True},
+            "",
+            1400,
+            700,
+        ),
+        node(
+            "DaData — Clean Lead Address",
+            "n8n-nodes-base.httpRequest",
+            4.2,
+            {
+                "method": "POST",
+                "url": "https://cleaner.dadata.ru/api/v1/clean/address",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpCustomAuth",
+                "sendBody": True,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify(["
+                            "$('Normalize Web Request').first().json.contact_address]) }}",
+                "options": {},
+            },
+            1600,
+            620,
+            {"credentials": {"httpCustomAuth": {"id": "REPLACE_ON_IMPORT", "name": "DaData"}},
+             "onError": "continueRegularOutput"},
+        ),
+        node("Check Lead Address", "n8n-nodes-base.code", 2,
+             {"jsCode": codes["Check Lead Address"]}, 1800, 620),
+        node("Build Lead", "n8n-nodes-base.code", 2,
+             {"jsCode": codes["Build Lead"]}, 2000, 700),
+        if_node(
+            "Lead Valid?",
+            "={{ $json.lead_ok }}",
+            {"type": "boolean", "operation": "true", "singleValue": True},
+            "",
+            2200,
+            700,
+        ),
+        node(
+            "Save Lead",
+            "n8n-nodes-base.dataTable",
+            1,
+            {
+                "operation": "insert",
+                "dataTableId": {"__rl": True, "value": LEADS_TABLE_ID, "mode": "id"},
+                "columns": {
+                    "mappingMode": "defineBelow",
+                    "value": {c: "={{ $json.%s }}" % c for c in LEAD_COLUMNS},
+                },
+                "options": {},
+            },
+            2400,
+            620,
+            # Таблица недоступна — человек всё равно получает подтверждение, а
+            # не сообщение об ошибке. Потерянная строка видна в Error Workflow;
+            # потерянное доверие посетителя не видно нигде.
+            {"onError": "continueRegularOutput"},
+        ),
+        reply_node(
+            "Reply — Lead Saved",
+            "={{ $('Build Lead').first().json.reply }}",
+            2600,
+            620,
+        ),
+        reply_node(
+            "Reply — Lead Rejected",
+            "={{ $('Build Lead').first().json.reply }}",
+            2400,
+            800,
+        ),
         reply_node(
             "Reply — Invalid",
             "=Не получилось обработать запрос: {{ $json.invalid_reason }}",
@@ -737,9 +920,38 @@ def build():
         "Rate Limited?": {
             "main": [
                 [{"node": "Reply — Rate Limited", "type": "main", "index": 0}],
+                [{"node": "Contact Submission?", "type": "main", "index": 0}],
+            ]
+        },
+        # --- ветка лида (B9) -------------------------------------------------
+        "Contact Submission?": {
+            "main": [
+                [{"node": "Check Quoted — Lead", "type": "main", "index": 0}],
                 [{"node": "Lead Agent", "type": "main", "index": 0}],
             ]
         },
+        "Check Quoted — Lead": {
+            "main": [[{"node": "Lead Address Given?", "type": "main", "index": 0}]]},
+        "Lead Address Given?": {
+            "main": [
+                [{"node": "DaData — Clean Lead Address", "type": "main", "index": 0}],
+                [{"node": "Build Lead", "type": "main", "index": 0}],
+            ]
+        },
+        "DaData — Clean Lead Address": {
+            "main": [[{"node": "Check Lead Address", "type": "main", "index": 0}]]},
+        "Check Lead Address": {
+            "main": [[{"node": "Build Lead", "type": "main", "index": 0}]]},
+        "Build Lead": {"main": [[{"node": "Lead Valid?", "type": "main", "index": 0}]]},
+        "Lead Valid?": {
+            "main": [
+                [{"node": "Save Lead", "type": "main", "index": 0}],
+                [{"node": "Reply — Lead Rejected", "type": "main", "index": 0}],
+            ]
+        },
+        "Save Lead": {"main": [[{"node": "Reply — Lead Saved", "type": "main", "index": 0}]]},
+        "Reply — Lead Saved": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
+        "Reply — Lead Rejected": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
         "Lead Agent": {"main": [[{"node": "Check Quoted", "type": "main", "index": 0}]]},
         "Check Quoted": {"main": [[{"node": "Decide Form", "type": "main", "index": 0}]]},
         "Decide Form": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
@@ -980,7 +1192,15 @@ def build_estimate():
             {
                 "operation": "set",
                 "key": "=quoted:{{ $json.session_id }}",
-                "value": "1",
+                # Раньше здесь лежала «1» — только факт расчёта. Теперь снимок
+                # сметы: строка лида должна нести цену, которую человек видел,
+                # а не ту, которую менеджер пересчитает через час по другим
+                # вводным. wasQuoted() считает меткой любое непустое значение,
+                # поэтому ворота формы от смены формата не страдают.
+                "value": "={{ JSON.stringify({ price_low: $json.price_low, "
+                         "price_high: $json.price_high, "
+                         "configuration: $json.configuration, "
+                         "glazing: $json.glazing }) }}",
                 "keyType": "string",
                 "expire": True,
                 "ttl": QUOTED_TTL,

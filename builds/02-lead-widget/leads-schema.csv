@@ -1,0 +1,2 @@
+session_id,created_at,channel,name,phone,consent,address_raw,address_clean,address_note,price_low,price_high,configuration,glazing,needs_review,review_reason
+SAMPLE-DELETE-ME,2026-09-15T09:00:00.000Z,web,Пример Удалить,+70000000000,true,,,адрес не указан,0,0,,,false,Пример строки — удалить после импорта

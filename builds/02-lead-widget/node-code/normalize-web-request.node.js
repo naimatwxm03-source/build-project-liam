@@ -17,6 +17,7 @@
 const MAX_TEXT = 2000; // человек столько не пишет; отсекаем вставленную простыню
 const MAX_NAME = 120;
 const MAX_PHONE = 32;
+const MAX_ADDRESS = 300; // адрес объекта — необязательное поле формы контактов
 
 /**
  * Выбрасывает управляющие символы и обрезает по длине.
@@ -57,6 +58,7 @@ function normalizeWebRequest(body) {
     is_contact: false,
     contact_name: '',
     contact_phone: '',
+    contact_address: '',
     contact_consent: false,
     valid: false,
     invalid_reason: '',
@@ -71,6 +73,9 @@ function normalizeWebRequest(body) {
     envelope.is_contact = true;
     envelope.contact_name = clean(contact.name, MAX_NAME);
     envelope.contact_phone = clean(contact.phone, MAX_PHONE);
+    // Схлопываем повторные пробелы: адрес уходит в DaData и в строку лида,
+    // а «Самара,  Ново-Садовая» — это лишний шум и в запросе, и в отчёте.
+    envelope.contact_address = clean(contact.address, MAX_ADDRESS).replace(/\s+/g, ' ');
     envelope.contact_consent = contact.consent === true;
 
     // 152-ФЗ. Галочка проверяется и в виджете, и здесь. Клиентскую проверку

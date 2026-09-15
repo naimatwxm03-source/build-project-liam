@@ -126,3 +126,35 @@ test('сбой Redis пропускает посетителя, но помеч�
   assert.strictEqual(d.rate_limited, false, 'сайт не должен падать из-за Redis');
   assert.strictEqual(d.rate_degraded, true, 'но это обязано быть видно в логе');
 });
+
+// --- адрес в форме контактов (B9) -------------------------------------------
+
+test('адрес из формы контактов попадает в конверт', () => {
+  const e = N.normalizeWebRequest({
+    session_id: 'w-1',
+    contact: { name: 'Иван', phone: '+79171234567', address: '  Самара,  Ново-Садовая 1 ', consent: true },
+  });
+  assert.strictEqual(e.is_contact, true);
+  assert.strictEqual(e.valid, true);
+  assert.strictEqual(e.contact_address, 'Самара, Ново-Садовая 1');
+});
+
+test('без адреса форма контактов по-прежнему валидна', () => {
+  // Адрес объявлен необязательным в виджете. Если он начнёт блокировать лид,
+  // мы потеряем людей, которые дали бы его по телефону.
+  const e = N.normalizeWebRequest({
+    session_id: 'w-2',
+    contact: { name: 'Иван', phone: '+79171234567', consent: true },
+  });
+  assert.strictEqual(e.valid, true);
+  assert.strictEqual(e.contact_address, '');
+});
+
+test('адрес не обходит проверку согласия', () => {
+  const e = N.normalizeWebRequest({
+    session_id: 'w-3',
+    contact: { name: 'Иван', phone: '+79171234567', address: 'Самара', consent: false },
+  });
+  assert.strictEqual(e.valid, false);
+  assert.match(e.invalid_reason, /соглас/);
+});

@@ -26,7 +26,7 @@
     },
     {
       "parameters": {
-        "jsCode": "/**\n * Приведение запроса виджета к общему конверту.\n *\n * Конверт тот же, что у VK-адаптера (builds/vk-adapter/normalize-vk.js):\n * channel, user_id, session_key, text, ts. Это не лишняя работа — благодаря\n * одинаковому конверту один и тот же агент обслужит и сайт, и VK, и Авито,\n * а добавление канала станет новым адаптером, а не переписыванием сборки.\n *\n * У веб-канала нет user_id, поэтому session_id играет обе роли. Он приходит\n * из браузера, то есть управляем снаружи — значит всё, что на нём завязано,\n * должно быть безвредно при подделке. Чужая память — это чужой разговор об\n * остеклении, не более; лимит считается по тому же ключу, поэтому подделка\n * не даёт обхода, а лишь делит чужую квоту.\n */\n'use strict';\n\nconst MAX_TEXT = 2000; // человек столько не пишет; отсекаем вставленную простыню\nconst MAX_NAME = 120;\nconst MAX_PHONE = 32;\n\n/**\n * Выбрасывает управляющие символы и обрезает по длине.\n *\n * Посимвольно, а не регуляркой с диапазоном: диапазон управляющих символов\n * приходится записывать escape-последовательностями, которые невидимы при\n * ревью и легко ломаются при копировании. Здесь условие видно глазами.\n */\nfunction clean(value, max) {\n  if (value == null) return '';\n  const s = String(value);\n  let out = '';\n  for (let i = 0; i < s.length; i++) {\n    const code = s.charCodeAt(i);\n    if (code < 32 || code === 127) continue;\n    out += s[i];\n  }\n  return out.trim().slice(0, max);\n}\n\n/** Телефон нужен менеджеру, а не парсеру: храним как есть, сверяем только длину. */\nfunction phoneDigits(raw) {\n  return clean(raw, MAX_PHONE).replace(/\\D/g, '').length;\n}\n\nfunction normalizeWebRequest(body) {\n  const b = body && typeof body === 'object' ? body : {};\n  const sessionId = clean(b.session_id, 64);\n  const contact = b.contact && typeof b.contact === 'object' ? b.contact : null;\n\n  const envelope = {\n    channel: 'web',\n    session_id: sessionId,\n    user_id: sessionId,\n    session_key: sessionId ? 'web:' + sessionId : '',\n    text: clean(b.message, MAX_TEXT),\n    ts: new Date().toISOString(),\n    is_contact: false,\n    contact_name: '',\n    contact_phone: '',\n    contact_consent: false,\n    valid: false,\n    invalid_reason: '',\n  };\n\n  if (!sessionId) {\n    envelope.invalid_reason = 'нет session_id';\n    return envelope;\n  }\n\n  if (contact) {\n    envelope.is_contact = true;\n    envelope.contact_name = clean(contact.name, MAX_NAME);\n    envelope.contact_phone = clean(contact.phone, MAX_PHONE);\n    envelope.contact_consent = contact.consent === true;\n\n    // 152-ФЗ. Галочка проверяется и в виджете, и здесь. Клиентскую проверку\n    // обойдёт любой, кто открыл консоль; серверную — нет. Телефон без согласия\n    // не сохраняется, и это не обсуждается.\n    if (!envelope.contact_consent) {\n      envelope.invalid_reason = 'нет согласия на обработку персональных данных';\n      return envelope;\n    }\n    if (phoneDigits(envelope.contact_phone) < 10) {\n      envelope.invalid_reason = 'телефон короче 10 цифр';\n      return envelope;\n    }\n    envelope.valid = true;\n    return envelope;\n  }\n\n  if (!envelope.text) {\n    envelope.invalid_reason = 'пустое сообщение';\n    return envelope;\n  }\n\n  envelope.valid = true;\n  return envelope;\n}\n\n// ---------------------------------------------------------------------------\n// Склейка с n8n. Всё выше внедряется из normalize-web.js генератором\n// make-workflow.py. Не править здесь — править источник и перегенерировать.\n// ---------------------------------------------------------------------------\nreturn $input.all().map((item) => ({\n  json: normalizeWebRequest(item.json.body !== undefined ? item.json.body : item.json),\n}));\n"
+        "jsCode": "/**\n * Приведение запроса виджета к общему конверту.\n *\n * Конверт тот же, что у VK-адаптера (builds/vk-adapter/normalize-vk.js):\n * channel, user_id, session_key, text, ts. Это не лишняя работа — благодаря\n * одинаковому конверту один и тот же агент обслужит и сайт, и VK, и Авито,\n * а добавление канала станет новым адаптером, а не переписыванием сборки.\n *\n * У веб-канала нет user_id, поэтому session_id играет обе роли. Он приходит\n * из браузера, то есть управляем снаружи — значит всё, что на нём завязано,\n * должно быть безвредно при подделке. Чужая память — это чужой разговор об\n * остеклении, не более; лимит считается по тому же ключу, поэтому подделка\n * не даёт обхода, а лишь делит чужую квоту.\n */\n'use strict';\n\nconst MAX_TEXT = 2000; // человек столько не пишет; отсекаем вставленную простыню\nconst MAX_NAME = 120;\nconst MAX_PHONE = 32;\nconst MAX_ADDRESS = 300; // адрес объекта — необязательное поле формы контактов\n\n/**\n * Выбрасывает управляющие символы и обрезает по длине.\n *\n * Посимвольно, а не регуляркой с диапазоном: диапазон управляющих символов\n * приходится записывать escape-последовательностями, которые невидимы при\n * ревью и легко ломаются при копировании. Здесь условие видно глазами.\n */\nfunction clean(value, max) {\n  if (value == null) return '';\n  const s = String(value);\n  let out = '';\n  for (let i = 0; i < s.length; i++) {\n    const code = s.charCodeAt(i);\n    if (code < 32 || code === 127) continue;\n    out += s[i];\n  }\n  return out.trim().slice(0, max);\n}\n\n/** Телефон нужен менеджеру, а не парсеру: храним как есть, сверяем только длину. */\nfunction phoneDigits(raw) {\n  return clean(raw, MAX_PHONE).replace(/\\D/g, '').length;\n}\n\nfunction normalizeWebRequest(body) {\n  const b = body && typeof body === 'object' ? body : {};\n  const sessionId = clean(b.session_id, 64);\n  const contact = b.contact && typeof b.contact === 'object' ? b.contact : null;\n\n  const envelope = {\n    channel: 'web',\n    session_id: sessionId,\n    user_id: sessionId,\n    session_key: sessionId ? 'web:' + sessionId : '',\n    text: clean(b.message, MAX_TEXT),\n    ts: new Date().toISOString(),\n    is_contact: false,\n    contact_name: '',\n    contact_phone: '',\n    contact_address: '',\n    contact_consent: false,\n    valid: false,\n    invalid_reason: '',\n  };\n\n  if (!sessionId) {\n    envelope.invalid_reason = 'нет session_id';\n    return envelope;\n  }\n\n  if (contact) {\n    envelope.is_contact = true;\n    envelope.contact_name = clean(contact.name, MAX_NAME);\n    envelope.contact_phone = clean(contact.phone, MAX_PHONE);\n    // Схлопываем повторные пробелы: адрес уходит в DaData и в строку лида,\n    // а «Самара,  Ново-Садовая» — это лишний шум и в запросе, и в отчёте.\n    envelope.contact_address = clean(contact.address, MAX_ADDRESS).replace(/\\s+/g, ' ');\n    envelope.contact_consent = contact.consent === true;\n\n    // 152-ФЗ. Галочка проверяется и в виджете, и здесь. Клиентскую проверку\n    // обойдёт любой, кто открыл консоль; серверную — нет. Телефон без согласия\n    // не сохраняется, и это не обсуждается.\n    if (!envelope.contact_consent) {\n      envelope.invalid_reason = 'нет согласия на обработку персональных данных';\n      return envelope;\n    }\n    if (phoneDigits(envelope.contact_phone) < 10) {\n      envelope.invalid_reason = 'телефон короче 10 цифр';\n      return envelope;\n    }\n    envelope.valid = true;\n    return envelope;\n  }\n\n  if (!envelope.text) {\n    envelope.invalid_reason = 'пустое сообщение';\n    return envelope;\n  }\n\n  envelope.valid = true;\n  return envelope;\n}\n\n// ---------------------------------------------------------------------------\n// Склейка с n8n. Всё выше внедряется из normalize-web.js генератором\n// make-workflow.py. Не править здесь — править источник и перегенерировать.\n// ---------------------------------------------------------------------------\nreturn $input.all().map((item) => ({\n  json: normalizeWebRequest(item.json.body !== undefined ? item.json.body : item.json),\n}));\n"
       },
       "id": "normalize-web-request",
       "name": "Normalize Web Request",
@@ -436,6 +436,298 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "contact-submission?",
+              "leftValue": "={{ $json.is_contact }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "contact-submission?",
+      "name": "Contact Submission?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1000,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "quoted",
+        "key": "=quoted:{{ $('Normalize Web Request').first().json.session_id }}",
+        "options": {}
+      },
+      "id": "check-quoted---lead",
+      "name": "Check Quoted — Lead",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        700
+      ],
+      "credentials": {
+        "redis": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Redis"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "lead-address-given?",
+              "leftValue": "={{ $('Normalize Web Request').first().json.contact_address }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "lead-address-given?",
+      "name": "Lead Address Given?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1400,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://cleaner.dadata.ru/api/v1/clean/address",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([$('Normalize Web Request').first().json.contact_address]) }}",
+        "options": {}
+      },
+      "id": "dadata---clean-lead-address",
+      "name": "DaData — Clean Lead Address",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1600,
+        620
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "DaData"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Разбор ответа DaData «стандартизация адресов» в решение: считать или переспросить.\n *\n * Правило простое и на нём держится доверие к сборке: НЕТ ВНЯТНОГО АДРЕСА —\n * НЕТ ЦЕНЫ. Тест 3 из брифа именно про это: на «ул. Пушкина» бот обязан\n * переспросить, а не назвать сумму. Цена, названная по адресу, которого не\n * существует, — это счёт, который заказчик потом не выставит, и разговор,\n * который он проведёт с нами, а не с клиентом.\n *\n * Адрес НЕ влияет на стоимость. Районных прайсов у нас нет, и наценку по\n * району мы не изобретаем (см. PRICING-SOURCES.md). Адрес нужен, чтобы\n * (1) убедиться, что объект реальный, (2) убедиться, что он в зоне выезда,\n * (3) передать его замерщику в разобранном виде.\n *\n * Почему разбираем коды, а не смотрим на координаты: DaData отдаёт готовый\n * вердикт полями qc и qc_complete. Выводить то же самое из координат — писать\n * эвристику поверх сервиса, который уже ответил.\n */\n'use strict';\n\n/** Регионы, куда компания выезжает. Меняется при внедрении у заказчика. */\nconst SERVICE_REGIONS = ['самарская'];\n\n/**\n * qc — нужна ли ручная проверка распознанного адреса.\n * Значения из документации DaData, не выдуманы.\n */\nconst QC = {\n  CONFIDENT: 0, // распознан уверенно\n  NEEDS_CHECK: 1, // лишние части или данных мало\n  GARBAGE: 2, // пустой или заведомо мусорный\n  AMBIGUOUS: 3, // есть альтернативные варианты\n};\n\n/**\n * qc_complete — годится ли адрес для доставки. Нам он говорит, чего не хватает.\n * Порядок в этой таблице — это порядок, в котором мы просим уточнить: нет\n * смысла спрашивать номер дома, если не назван город.\n */\nconst INCOMPLETE_REASON = {\n  1: 'не указан регион',\n  2: 'не указан город',\n  3: 'не указана улица',\n  4: 'не указан номер дома',\n  6: 'адрес неполный',\n  7: 'это адрес не в России',\n};\n\nfunction str(v) {\n  return v == null ? '' : String(v).trim();\n}\n\nfunction firstRecord(response) {\n  // DaData отвечает массивом даже на один адрес. Узел HTTP Request в n8n\n  // отдаёт его то массивом, то объектом с полем data — принимаем оба.\n  if (Array.isArray(response)) return response[0] || null;\n  if (response && typeof response === 'object') {\n    if (Array.isArray(response.data)) return response.data[0] || null;\n    if (response.result !== undefined || response.qc !== undefined) return response;\n  }\n  return null;\n}\n\nfunction inServiceArea(region) {\n  const r = str(region).toLowerCase().replace(/ё/g, 'е');\n  if (!r) return false;\n  return SERVICE_REGIONS.some((s) => r.includes(s));\n}\n\n/**\n * @returns {{ok: boolean, reason: string, ask: string, address: object}}\n *   ok      — можно ли считать смету\n *   reason  — техническая причина отказа, для лога\n *   ask     — что сказать человеку; пусто, если всё в порядке\n *   address — разобранный адрес для лида\n */\nfunction interpretAddress(response) {\n  const rec = firstRecord(response);\n\n  if (!rec) {\n    // Сервис не ответил или ответил непонятно. Это НЕ повод отказать человеку:\n    // адрес на цену не влияет, а терять лид из-за сбоя стороннего сервиса —\n    // худший из возможных исходов. Считаем, но помечаем адрес непроверенным.\n    return {\n      ok: true,\n      degraded: true,\n      reason: 'DaData не ответила — адрес не проверен',\n      ask: '',\n      address: { raw: '', result: '', city: '', street: '', house: '', region: '' },\n    };\n  }\n\n  const address = {\n    raw: str(rec.source),\n    result: str(rec.result),\n    region: str(rec.region_with_type) || str(rec.region),\n    city: str(rec.city_with_type) || str(rec.city) || str(rec.settlement_with_type),\n    district: str(rec.city_district_with_type),\n    street: str(rec.street_with_type),\n    house: str(rec.house),\n    lat: str(rec.geo_lat),\n    lon: str(rec.geo_lon),\n    fias_level: rec.fias_level == null ? '' : String(rec.fias_level),\n  };\n\n  const qc = Number(rec.qc);\n  const complete = Number(rec.qc_complete);\n\n  if (qc === QC.GARBAGE) {\n    return {\n      ok: false,\n      degraded: false,\n      reason: 'qc=2: адрес пустой или мусорный',\n      ask: 'Не разобрал адрес. Напишите, пожалуйста, город, улицу и номер дома.',\n      address,\n    };\n  }\n\n  // Иностранный адрес ловим раньше зоны выезда: человеку полезнее услышать\n  // «мы работаем только в Самарской области», чем «не указан регион».\n  if (complete === 7) {\n    return {\n      ok: false,\n      degraded: false,\n      reason: 'qc_complete=7: иностранный адрес',\n      ask: 'Мы работаем в Самаре и Самарской области. Подскажите адрес объекта в этом регионе.',\n      address,\n    };\n  }\n\n  if (INCOMPLETE_REASON[complete]) {\n    const what = INCOMPLETE_REASON[complete];\n    return {\n      ok: false,\n      degraded: false,\n      reason: `qc_complete=${complete}: ${what}`,\n      ask: `Уточните, пожалуйста, адрес — ${what}.`,\n      address,\n    };\n  }\n\n  if (qc === QC.AMBIGUOUS) {\n    return {\n      ok: false,\n      degraded: false,\n      reason: 'qc=3: несколько подходящих адресов',\n      ask: 'Таких адресов в городе несколько. Уточните, пожалуйста, район или полное название улицы.',\n      address,\n    };\n  }\n\n  // Регион определился, но не наш. Честно сказать сейчас дешевле, чем\n  // отправить замерщика за 400 км и разбираться потом.\n  if (address.region && !inServiceArea(address.region)) {\n    return {\n      ok: false,\n      degraded: false,\n      reason: `вне зоны выезда: ${address.region}`,\n      ask: `Мы работаем в Самаре и Самарской области, а ${address.region} — за пределами выезда. Подсказать кого-то в вашем городе не смогу, но посчитать для объекта в Самарской области — с радостью.`,\n      address,\n    };\n  }\n\n  // qc=1 — данных маловато, но дом и город есть. Считаем, помечаем адрес\n  // приблизительным: замерщик всё равно позвонит перед выездом.\n  if (qc === QC.NEEDS_CHECK) {\n    return {\n      ok: true,\n      degraded: true,\n      reason: 'qc=1: адрес распознан неточно',\n      ask: '',\n      address,\n    };\n  }\n\n  return { ok: true, degraded: false, reason: '', ask: '', address };\n}\n// ---------------------------------------------------------------------------\n//   источник: builds/02-lead-widget/address.js\n//\n// Тот же разбор ответа DaData, что и в подworkflow расчёта, но на пути лида.\n// Здесь вердикт НИКОГДА не отменяет запись: он только решает, ляжет ли строка\n// на ручную проверку. Адрес на цену не влияет, а потерять уже отданный\n// телефон из-за плохого адреса — самый дорогой возможный исход.\n// ---------------------------------------------------------------------------\nreturn $input.all().map((item) => ({ json: { lead_address: interpretAddress(item.json) } }));\n"
+      },
+      "id": "check-lead-address",
+      "name": "Check Lead Address",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Сборка строки лида из того, что накопилось за разговор.\n *\n * Лид — это единственный результат, за который клиент платит. Всё остальное в\n * сборке существует ради того, чтобы эта строка появилась и была полезной\n * менеджеру. Поэтому здесь два правила, и оба жёстче обычного:\n *\n * 1. БЕЗ СОГЛАСИЯ СТРОКИ НЕТ. 152-ФЗ. Галочку проверяет виджет, но виджет\n *    живёт в браузере посетителя и обходится консолью за десять секунд.\n *    Проверка здесь — единственная, которая что-то гарантирует.\n *\n * 2. ЛИД НЕ ТЕРЯЕТСЯ НИКОГДА. Плохой адрес, недоступная DaData, пропавший\n *    расчёт — всё это поводы пометить строку на ручную проверку, но не поводы\n *    выбросить телефон человека, который его оставил. Правило CLAUDE.md:\n *    «сбой разбора уходит на ручную проверку, а не в автоматический отказ».\n */\n'use strict';\n\nconst MAX = { name: 120, phone: 32, address: 300, reason: 500 };\n\nfunction str(v, max) {\n  if (v == null) return '';\n  return String(v).trim().replace(/\\s+/g, ' ').slice(0, max);\n}\n\n/**\n * Читает снимок расчёта из Redis.\n *\n * Ключ `quoted:<session_id>` раньше хранил строку «1» — только факт расчёта.\n * Теперь там JSON со сметой, но старые ключи живут ещё час после обновления,\n * и разбор обязан пережить оба формата. Возврат null означает «расчёта не\n * видно» — это повод для ручной проверки, а не для отказа.\n */\nfunction parseQuoted(raw) {\n  if (raw == null) return null;\n  const s = typeof raw === 'string' ? raw.trim() : raw;\n  if (s === '' || s === '1' || s === 1) return null;\n\n  let o = s;\n  if (typeof s === 'string') {\n    try { o = JSON.parse(s); } catch (e) { return null; }\n  }\n  if (!o || typeof o !== 'object') return null;\n\n  const low = Number(o.price_low);\n  const high = Number(o.price_high);\n  if (!Number.isFinite(low) || !Number.isFinite(high)) return null;\n\n  return {\n    price_low: low,\n    price_high: high,\n    configuration: str(o.configuration, 40),\n    glazing: str(o.glazing, 20),\n  };\n}\n\n/**\n * @param {object} opts\n * @param {object} opts.envelope   конверт из normalize-web.js\n * @param {object} opts.address    вердикт interpretAddress, или null если адреса нет\n * @param {object} opts.quoted     результат parseQuoted, или null\n * @returns {{ok: boolean, reason: string, row: object}}\n *   ok=false означает, что строку писать НЕЛЬЗЯ (нет согласия). Во всех\n *   остальных случаях строка пишется, но может быть помечена needs_review.\n */\nfunction buildLead(opts) {\n  const o = opts || {};\n  const env = o.envelope && typeof o.envelope === 'object' ? o.envelope : {};\n  const quoted = o.quoted || null;\n  const addr = o.address || null;\n\n  // Согласие. Единственная проверка во всей функции, которая отказывает.\n  if (env.contact_consent !== true) {\n    return { ok: false, reason: 'нет согласия на обработку персональных данных', row: null };\n  }\n\n  const phone = str(env.contact_phone, MAX.phone);\n  if (phone.replace(/\\D/g, '').length < 10) {\n    return { ok: false, reason: 'телефон короче 10 цифр', row: null };\n  }\n\n  const review = [];\n  if (!quoted) review.push('расчёт не найден — форма показалась без сметы');\n\n  let addressRaw = '';\n  let addressClean = '';\n  let addressNote = '';\n  if (addr) {\n    addressRaw = str(addr.address && addr.address.raw, MAX.address);\n    addressClean = str(addr.address && addr.address.result, MAX.address);\n    addressNote = str(addr.reason, MAX.reason);\n    if (addr.degraded) review.push('адрес не проверен — DaData недоступна');\n    else if (!addr.ok) review.push('адрес не подтверждён: ' + addressNote);\n  } else {\n    addressNote = 'адрес не указан';\n  }\n\n  return {\n    ok: true,\n    reason: '',\n    row: {\n      session_id: str(env.session_id, 64),\n      created_at: new Date().toISOString(),\n      channel: str(env.channel, 16) || 'web',\n      name: str(env.contact_name, MAX.name),\n      phone,\n      consent: true,\n      address_raw: addressRaw,\n      address_clean: addressClean,\n      address_note: addressNote,\n      price_low: quoted ? quoted.price_low : null,\n      price_high: quoted ? quoted.price_high : null,\n      configuration: quoted ? quoted.configuration : '',\n      glazing: quoted ? quoted.glazing : '',\n      needs_review: review.length > 0,\n      review_reason: str(review.join('; '), MAX.reason),\n    },\n  };\n}\n\n/** Что сказать человеку после того, как строка записана. */\nfunction leadReply(row, clientPhone) {\n  const named = row && row.name ? row.name.split(' ')[0] : '';\n  const hello = named ? named + ', заявка принята' : 'Заявка принята';\n  const tail = clientPhone\n    ? '\\n\\nЕсли удобнее позвонить самому: **' + clientPhone + '**'\n    : '';\n  return hello + '. Замерщик свяжется с вами, чтобы согласовать время — ' +\n    'замер бесплатный и ни к чему не обязывает.' + tail;\n}\n// ---------------------------------------------------------------------------\n//   источник: builds/02-lead-widget/lead.js\n//\n// Конверт и метку расчёта берём по именам узлов: и Redis, и HTTP подменяют\n// элемент своим ответом, поэтому $json здесь — это не конверт.\n//\n// Вердикт по адресу может отсутствовать: поле адреса в форме необязательное,\n// и при пустом адресе ветка DaData не выполняется вовсе. Обращение к узлу,\n// который не выполнялся, бросает исключение — отсюда try/catch.\n// ---------------------------------------------------------------------------\nconst envelope = $('Normalize Web Request').first().json;\nconst CLIENT_PHONE = \"+7 (846) 000-00-00\";\n\nlet quotedRaw = null;\ntry {\n  const q = $('Check Quoted — Lead').first().json;\n  quotedRaw = q && q.quoted !== undefined ? q.quoted : null;\n} catch (e) {\n  quotedRaw = null;\n}\n\nlet addressVerdict = null;\nif (envelope.contact_address) {\n  try {\n    addressVerdict = $('Check Lead Address').first().json.lead_address || null;\n  } catch (e) {\n    addressVerdict = null;\n  }\n}\n\nconst built = buildLead({\n  envelope,\n  address: addressVerdict,\n  quoted: parseQuoted(quotedRaw),\n});\n\nreturn [{\n  json: {\n    session_id: envelope.session_id,\n    lead_ok: built.ok,\n    lead_reason: built.reason,\n    ...(built.row || {}),\n    reply: built.ok\n      ? leadReply(built.row, CLIENT_PHONE)\n      : 'Не получилось сохранить заявку: ' + built.reason +\n        '. Позвоните, пожалуйста, напрямую: **' + CLIENT_PHONE + '**',\n  },\n}];\n"
+      },
+      "id": "build-lead",
+      "name": "Build Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "lead-valid?",
+              "leftValue": "={{ $json.lead_ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "lead-valid?",
+      "name": "Lead Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_ON_IMPORT",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.session_id }}",
+            "created_at": "={{ $json.created_at }}",
+            "channel": "={{ $json.channel }}",
+            "name": "={{ $json.name }}",
+            "phone": "={{ $json.phone }}",
+            "consent": "={{ $json.consent }}",
+            "address_raw": "={{ $json.address_raw }}",
+            "address_clean": "={{ $json.address_clean }}",
+            "address_note": "={{ $json.address_note }}",
+            "price_low": "={{ $json.price_low }}",
+            "price_high": "={{ $json.price_high }}",
+            "configuration": "={{ $json.configuration }}",
+            "glazing": "={{ $json.glazing }}",
+            "needs_review": "={{ $json.needs_review }}",
+            "review_reason": "={{ $json.review_reason }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "save-lead",
+      "name": "Save Lead",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        620
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "session_id",
+              "name": "session_id",
+              "type": "string",
+              "value": "={{ $('Normalize Web Request').first().json.session_id }}"
+            },
+            {
+              "id": "reply",
+              "name": "reply",
+              "type": "string",
+              "value": "={{ $('Build Lead').first().json.reply }}"
+            },
+            {
+              "id": "form",
+              "name": "form",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "reply---lead-saved",
+      "name": "Reply — Lead Saved",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2600,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "session_id",
+              "name": "session_id",
+              "type": "string",
+              "value": "={{ $('Normalize Web Request').first().json.session_id }}"
+            },
+            {
+              "id": "reply",
+              "name": "reply",
+              "type": "string",
+              "value": "={{ $('Build Lead').first().json.reply }}"
+            },
+            {
+              "id": "form",
+              "name": "form",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "reply---lead-rejected",
+      "name": "Reply — Lead Rejected",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2400,
+        800
+      ]
+    },
+    {
+      "parameters": {
         "mode": "manual",
         "includeOtherFields": true,
         "assignments": {
@@ -561,7 +853,138 @@
         ],
         [
           {
+            "node": "Contact Submission?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contact Submission?": {
+      "main": [
+        [
+          {
+            "node": "Check Quoted — Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Lead Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Quoted — Lead": {
+      "main": [
+        [
+          {
+            "node": "Lead Address Given?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Address Given?": {
+      "main": [
+        [
+          {
+            "node": "DaData — Clean Lead Address",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DaData — Clean Lead Address": {
+      "main": [
+        [
+          {
+            "node": "Check Lead Address",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Lead Address": {
+      "main": [
+        [
+          {
+            "node": "Build Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Lead": {
+      "main": [
+        [
+          {
+            "node": "Lead Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Valid?": {
+      "main": [
+        [
+          {
+            "node": "Save Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply — Lead Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Lead": {
+      "main": [
+        [
+          {
+            "node": "Reply — Lead Saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply — Lead Saved": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply — Lead Rejected": {
+      "main": [
+        [
+          {
+            "node": "Respond",
             "type": "main",
             "index": 0
           }

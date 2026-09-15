@@ -284,7 +284,7 @@
       "parameters": {
         "operation": "set",
         "key": "=quoted:{{ $json.session_id }}",
-        "value": "1",
+        "value": "={{ JSON.stringify({ price_low: $json.price_low, price_high: $json.price_high, configuration: $json.configuration, glazing: $json.glazing }) }}",
         "keyType": "string",
         "expire": true,
         "ttl": 3600
