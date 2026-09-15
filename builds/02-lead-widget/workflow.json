@@ -401,6 +401,29 @@
     {
       "parameters": {
         "operation": "get",
+        "propertyName": "already_lead",
+        "key": "=lead:{{ $('Normalize Web Request').first().json.session_id }}",
+        "options": {}
+      },
+      "id": "check-lead",
+      "name": "Check Lead",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        320
+      ],
+      "credentials": {
+        "redis": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Redis"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "get",
         "propertyName": "quoted",
         "key": "=quoted:{{ $('Normalize Web Request').first().json.session_id }}",
         "keyType": "automatic",
@@ -424,7 +447,7 @@
     },
     {
       "parameters": {
-        "jsCode": "/**\n * Решение: показывать ли форму контактов.\n *\n * ЭТО САМОЕ ВАЖНОЕ ПРАВИЛО СБОРКИ, И ОНО НАМЕРЕННО НЕ В ПРОМПТЕ.\n *\n * Форма появляется тогда и только тогда, когда подworkflow расчёта поставил в\n * Redis ключ `quoted:<session_id>`. То есть — когда человеку действительно\n * показали цену.\n *\n * Промпт можно уговорить: «покажи форму», «мне срочно», достаточно длинный\n * разговор — и модель уступит. Ключ в Redis уговорить нельзя: его ставит код\n * после успешного расчёта, и он либо есть, либо нет. Разница между «модели\n * велено не просить телефон раньше времени» и «телефон физически невозможно\n * попросить раньше времени» — это разница между обещанием и гарантией.\n *\n * Зачем вообще: посетитель, у которого просят телефон до того, как дали\n * пользу, закрывает чат. Весь виджет построен вокруг обратного порядка, и эта\n * функция — то место, где порядок держится.\n */\n'use strict';\n\n/**\n * Redis-узел n8n кладёт результат GET под именем свойства, а не под именем\n * ключа, и при отсутствии ключа отдаёт null, undefined или пустую строку —\n * в зависимости от версии и настроек. Считаем меткой только явное значение.\n */\nfunction wasQuoted(redisJson, propertyName) {\n  if (redisJson == null || typeof redisJson !== 'object') return false;\n\n  const direct = redisJson[propertyName];\n  if (direct !== undefined) {\n    return direct !== null && String(direct).trim() !== '';\n  }\n\n  // Имя свойства могло разойтись с настройкой узла — тогда ищем любое\n  // непустое значение. Лучше показать форму на один ход позже, чем не\n  // показать никогда из-за переименованного поля.\n  for (const v of Object.values(redisJson)) {\n    if (v !== null && v !== undefined && String(v).trim() !== '') return true;\n  }\n  return false;\n}\n\n/**\n * @param {object} opts\n * @param {boolean} opts.quoted        поставлена ли метка расчёта\n * @param {boolean} opts.isContact     это уже отправка контактов\n * @param {string}  opts.agentReply    что ответил агент\n * @param {string}  opts.fallbackReply что сказать, если агент промолчал\n */\nfunction decideForm(opts) {\n  const o = opts || {};\n  const reply = String(o.agentReply == null ? '' : o.agentReply).trim();\n\n  return {\n    reply: reply || String(o.fallbackReply || ''),\n    // Форму не показываем в ответ на саму отправку контактов: человек их уже\n    // прислал, и повторная форма выглядит так, будто заявка не ушла.\n    form: o.quoted === true && o.isContact !== true ? 'contact' : '',\n    agent_silent: reply === '',\n  };\n}\n\n// ---------------------------------------------------------------------------\n//   источник: builds/02-lead-widget/form-gate.js\n//\n// Узлы Redis и Agent оба подменяют элемент своим выводом, поэтому и конверт,\n// и ответ агента берём по именам узлов, а не из $json.\n// ---------------------------------------------------------------------------\nconst envelope = $('Normalize Web Request').first().json;\nconst agent = $('Lead Agent').first().json;\nconst FALLBACK = \"Секунду, соединяюсь с менеджером — а пока можно позвонить напрямую: **+7 (846) 000-00-00**\";\n\nreturn $input.all().map((item) => {\n  const decided = decideForm({\n    quoted: wasQuoted(item.json, 'quoted'),\n    isContact: envelope.is_contact === true,\n    agentReply: agent.output,\n    fallbackReply: FALLBACK,\n  });\n  return { json: { ...envelope, ...decided } };\n});\n"
+        "jsCode": "/**\n * Решение: показывать ли форму контактов.\n *\n * ЭТО САМОЕ ВАЖНОЕ ПРАВИЛО СБОРКИ, И ОНО НАМЕРЕННО НЕ В ПРОМПТЕ.\n *\n * Форма появляется тогда и только тогда, когда подworkflow расчёта поставил в\n * Redis ключ `quoted:<session_id>`. То есть — когда человеку действительно\n * показали цену.\n *\n * Промпт можно уговорить: «покажи форму», «мне срочно», достаточно длинный\n * разговор — и модель уступит. Ключ в Redis уговорить нельзя: его ставит код\n * после успешного расчёта, и он либо есть, либо нет. Разница между «модели\n * велено не просить телефон раньше времени» и «телефон физически невозможно\n * попросить раньше времени» — это разница между обещанием и гарантией.\n *\n * Зачем вообще: посетитель, у которого просят телефон до того, как дали\n * пользу, закрывает чат. Весь виджет построен вокруг обратного порядка, и эта\n * функция — то место, где порядок держится.\n */\n'use strict';\n\n/**\n * Redis-узел n8n кладёт результат GET под именем свойства, а не под именем\n * ключа, и при отсутствии ключа отдаёт null, undefined или пустую строку —\n * в зависимости от версии и настроек. Считаем меткой только явное значение.\n */\nfunction wasQuoted(redisJson, propertyName) {\n  if (redisJson == null || typeof redisJson !== 'object') return false;\n\n  const direct = redisJson[propertyName];\n  if (direct !== undefined) {\n    return direct !== null && String(direct).trim() !== '';\n  }\n\n  // Имя свойства могло разойтись с настройкой узла — тогда ищем любое\n  // непустое значение. Лучше показать форму на один ход позже, чем не\n  // показать никогда из-за переименованного поля.\n  for (const v of Object.values(redisJson)) {\n    if (v !== null && v !== undefined && String(v).trim() !== '') return true;\n  }\n  return false;\n}\n\n/**\n * @param {object} opts\n * @param {boolean} opts.quoted        поставлена ли метка расчёта\n * @param {boolean} opts.isContact     это уже отправка контактов\n * @param {boolean} opts.alreadyLead   заявка по этой сессии уже принята\n * @param {string}  opts.agentReply    что ответил агент\n * @param {string}  opts.fallbackReply что сказать, если агент промолчал\n */\nfunction decideForm(opts) {\n  const o = opts || {};\n  const reply = String(o.agentReply == null ? '' : o.agentReply).trim();\n\n  return {\n    reply: reply || String(o.fallbackReply || ''),\n    // Три условия, и каждое стоит лида, если его убрать:\n    //\n    // quoted — цену показали. Это и есть коммерческое правило сборки.\n    //\n    // isContact — не показываем форму в ответ на саму отправку контактов:\n    // человек их уже прислал, и повторная форма выглядит так, будто заявка\n    // не ушла, и он отправляет второй раз.\n    //\n    // alreadyLead — по этой сессии заявка УЖЕ принята. Без этой проверки\n    // форма возвращалась на каждое следующее сообщение целый час: метка\n    // расчёта живёт в Redis, а session_id — в localStorage браузера. Человек\n    // написал «доброе утро», получил ответ и снова увидел форму. Поймано на\n    // живой странице; ни один curl этого не показывал, потому что curl не\n    // продолжает вчерашнюю сессию.\n    form: o.quoted === true && o.isContact !== true && o.alreadyLead !== true\n      ? 'contact' : '',\n    agent_silent: reply === '',\n  };\n}\n\n// ---------------------------------------------------------------------------\n//   источник: builds/02-lead-widget/form-gate.js\n//\n// Узлы Redis и Agent оба подменяют элемент своим выводом, поэтому и конверт,\n// и ответ агента берём по именам узлов, а не из $json.\n// ---------------------------------------------------------------------------\nconst envelope = $('Normalize Web Request').first().json;\nconst agent = $('Lead Agent').first().json;\n\n// Заявка по этой сессии уже принята? Узел Redis подменяет элемент, поэтому\n// читаем его по имени. Ключ живёт 30 дней: session_id лежит в localStorage,\n// и человек возвращается в ту же сессию не только сегодня.\nlet alreadyLead = false;\ntry {\n  alreadyLead = wasQuoted($('Check Lead').first().json, 'already_lead');\n} catch (e) {\n  alreadyLead = false;\n}\nconst FALLBACK = \"Секунду, соединяюсь с менеджером — а пока можно позвонить напрямую: **+7 (846) 000-00-00**\";\n\nreturn $input.all().map((item) => {\n  const decided = decideForm({\n    quoted: wasQuoted(item.json, 'quoted'),\n    isContact: envelope.is_contact === true,\n    alreadyLead,\n    agentReply: agent.output,\n    fallbackReply: FALLBACK,\n  });\n  return { json: { ...envelope, ...decided } };\n});\n"
       },
       "id": "decide-form",
       "name": "Decide Form",
@@ -655,6 +678,31 @@
     },
     {
       "parameters": {
+        "operation": "set",
+        "key": "=lead:{{ $('Normalize Web Request').first().json.session_id }}",
+        "value": "1",
+        "keyType": "string",
+        "expire": true,
+        "ttl": 2592000
+      },
+      "id": "mark-lead",
+      "name": "Mark Lead",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        2600,
+        620
+      ],
+      "credentials": {
+        "redis": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Redis"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
         "mode": "manual",
         "includeOtherFields": true,
         "assignments": {
@@ -686,7 +734,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2600,
+        2800,
         620
       ]
     },
@@ -963,6 +1011,17 @@
       "main": [
         [
           {
+            "node": "Mark Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Lead": {
+      "main": [
+        [
+          {
             "node": "Reply — Lead Saved",
             "type": "main",
             "index": 0
@@ -993,6 +1052,17 @@
       ]
     },
     "Lead Agent": {
+      "main": [
+        [
+          {
+            "node": "Check Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Lead": {
       "main": [
         [
           {

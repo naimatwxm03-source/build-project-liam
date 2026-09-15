@@ -45,6 +45,7 @@ function wasQuoted(redisJson, propertyName) {
  * @param {object} opts
  * @param {boolean} opts.quoted        поставлена ли метка расчёта
  * @param {boolean} opts.isContact     это уже отправка контактов
+ * @param {boolean} opts.alreadyLead   заявка по этой сессии уже принята
  * @param {string}  opts.agentReply    что ответил агент
  * @param {string}  opts.fallbackReply что сказать, если агент промолчал
  */
@@ -54,9 +55,22 @@ function decideForm(opts) {
 
   return {
     reply: reply || String(o.fallbackReply || ''),
-    // Форму не показываем в ответ на саму отправку контактов: человек их уже
-    // прислал, и повторная форма выглядит так, будто заявка не ушла.
-    form: o.quoted === true && o.isContact !== true ? 'contact' : '',
+    // Три условия, и каждое стоит лида, если его убрать:
+    //
+    // quoted — цену показали. Это и есть коммерческое правило сборки.
+    //
+    // isContact — не показываем форму в ответ на саму отправку контактов:
+    // человек их уже прислал, и повторная форма выглядит так, будто заявка
+    // не ушла, и он отправляет второй раз.
+    //
+    // alreadyLead — по этой сессии заявка УЖЕ принята. Без этой проверки
+    // форма возвращалась на каждое следующее сообщение целый час: метка
+    // расчёта живёт в Redis, а session_id — в localStorage браузера. Человек
+    // написал «доброе утро», получил ответ и снова увидел форму. Поймано на
+    // живой странице; ни один curl этого не показывал, потому что curl не
+    // продолжает вчерашнюю сессию.
+    form: o.quoted === true && o.isContact !== true && o.alreadyLead !== true
+      ? 'contact' : '',
     agent_silent: reply === '',
   };
 }
@@ -69,12 +83,23 @@ function decideForm(opts) {
 // ---------------------------------------------------------------------------
 const envelope = $('Normalize Web Request').first().json;
 const agent = $('Lead Agent').first().json;
+
+// Заявка по этой сессии уже принята? Узел Redis подменяет элемент, поэтому
+// читаем его по имени. Ключ живёт 30 дней: session_id лежит в localStorage,
+// и человек возвращается в ту же сессию не только сегодня.
+let alreadyLead = false;
+try {
+  alreadyLead = wasQuoted($('Check Lead').first().json, 'already_lead');
+} catch (e) {
+  alreadyLead = false;
+}
 const FALLBACK = "Секунду, соединяюсь с менеджером — а пока можно позвонить напрямую: **+7 (846) 000-00-00**";
 
 return $input.all().map((item) => {
   const decided = decideForm({
     quoted: wasQuoted(item.json, 'quoted'),
     isContact: envelope.is_contact === true,
+    alreadyLead,
     agentReply: agent.output,
     fallbackReply: FALLBACK,
   });

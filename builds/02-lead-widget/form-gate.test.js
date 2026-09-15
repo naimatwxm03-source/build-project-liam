@@ -77,3 +77,29 @@ test('переименованное поле не ломает ворота н�
   assert.strictEqual(G.wasQuoted({ propertyName: '1' }, 'quoted'), true);
   assert.strictEqual(G.wasQuoted({ propertyName: '' }, 'quoted'), false);
 });
+
+// --- заявка уже принята (B13) ------------------------------------------------
+
+test('после принятой заявки форма больше не показывается', () => {
+  // Поймано на живой странице. Метка расчёта живёт в Redis час, session_id —
+  // в localStorage. Человек, оставивший заявку, писал «доброе утро» и снова
+  // видел форму. Выглядит так, будто его заявку не получили.
+  const r = G.decideForm({ quoted: true, alreadyLead: true, agentReply: 'Доброе утро!' });
+  assert.strictEqual(r.form, '');
+});
+
+test('метка заявки сильнее метки расчёта', () => {
+  // Даже при свежем расчёте: заявка по сессии уже есть, второй раз не просим.
+  const r = G.decideForm({ quoted: true, alreadyLead: true, isContact: false,
+                           agentReply: 'от 34 000 до 70 000 ₽' });
+  assert.strictEqual(r.form, '');
+});
+
+test('только явное true закрывает форму по заявке', () => {
+  // Redis отдаёт отсутствие ключа по-разному. Правдоподобное значение не
+  // должно молча закрыть форму человеку, который заявку НЕ оставлял.
+  for (const sneaky of ['true', 1, {}, [], 'yes', undefined, null, false]) {
+    const r = G.decideForm({ quoted: true, alreadyLead: sneaky, agentReply: 'цена' });
+    assert.strictEqual(r.form, 'contact', JSON.stringify(sneaky));
+  }
+});

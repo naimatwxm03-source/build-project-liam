@@ -122,7 +122,7 @@
     '.send{flex:0 0 auto;width:38px;height:38px;border:0;border-radius:10px;background:var(--accent);',
     'color:#fff;cursor:pointer;font-size:17px}',
     '.send:disabled{opacity:.45;cursor:default}',
-    '.form{display:flex;flex-direction:column;gap:8px}',
+    '.form{display:flex;flex-direction:column;gap:8px;padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid #e6e8ec}',
     '.form input{border:1px solid #d7dae0;border-radius:10px;padding:9px 11px;font:inherit;font-size:14px;outline:0;color:#16181d;background:#fff}',
     '.form input:focus{border-color:var(--accent)}',
     '.form .consent{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;color:#5c6370;line-height:1.4}',
@@ -193,12 +193,27 @@
   // ---------------------------------------------------------------------------
   // Composer — either the message box or the contact form, never both.
   // ---------------------------------------------------------------------------
+  /**
+   * Поле ввода. Создаётся один раз и живёт до конца разговора.
+   *
+   * Пересоздание на каждый ответ сервера стирало набранный текст и сбрасывало
+   * фокус — а вместе с формой контактов ещё и оставляло человека без
+   * возможности написать хоть что-то.
+   */
+  function ensureComposer() {
+    if (foot.querySelector('.row')) return foot.querySelector('textarea');
+    return showComposer();
+  }
+
   function showComposer() {
-    foot.innerHTML =
+    var row = document.createElement('div');
+    row.innerHTML =
       '<div class="row">' +
       '<textarea rows="1" placeholder="Напишите сообщение…" aria-label="Сообщение"></textarea>' +
       '<button class="send" aria-label="Отправить">➤</button>' +
       '</div>';
+    foot.appendChild(row.firstChild);
+
     var ta = foot.querySelector('textarea');
     var send = foot.querySelector('.send');
 
@@ -220,12 +235,27 @@
     return ta;
   }
 
+  /**
+   * Форма контактов. ПОЯВЛЯЕТСЯ РЯДОМ С ПОЛЕМ ВВОДА, А НЕ ВМЕСТО НЕГО.
+   *
+   * Раньше она затирала поле ввода целиком, и человек оказывался в тупике:
+   * либо заполняй форму, либо уходи. Поймано на живой странице — посетитель
+   * написал «доброе утро», получил ответ и потерял возможность писать дальше.
+   * Для лид-формы это самая дорогая из возможных ошибок: она выгоняет ровно
+   * тех, кто ещё выбирает.
+   *
+   * Повторный вызов ничего не делает: форма показывается один раз за сессию,
+   * а не навязывается на каждое сообщение.
+   */
   function showContactForm() {
+    if (foot.querySelector('.form')) return;   // уже показана — не мигаем ею
+
     var privacy = cfg.privacyUrl
       ? '<a href="' + escapeHtml(cfg.privacyUrl) + '" target="_blank" rel="noopener">обработку персональных данных</a>'
       : 'обработку персональных данных';
 
-    foot.innerHTML =
+    var box = document.createElement('div');
+    box.innerHTML =
       '<div class="form">' +
       '<input type="text" name="name" placeholder="Как вас зовут?" autocomplete="name">' +
       '<input type="tel" name="phone" placeholder="Телефон" autocomplete="tel" inputmode="tel">' +
@@ -239,11 +269,14 @@
       '<button type="button" disabled>Отправить</button>' +
       '</div>';
 
-    var name = foot.querySelector('[name=name]');
-    var phone = foot.querySelector('[name=phone]');
-    var address = foot.querySelector('[name=address]');
-    var consent = foot.querySelector('[name=consent]');
-    var btn = foot.querySelector('button');
+    var form = box.firstChild;
+    foot.insertBefore(form, foot.firstChild);   // над полем ввода, не поверх
+
+    var name = form.querySelector('[name=name]');
+    var phone = form.querySelector('[name=phone]');
+    var address = form.querySelector('[name=address]');
+    var consent = form.querySelector('[name=consent]');
+    var btn = form.querySelector('button');
 
     // Consent is a hard gate, not a nudge. No tick, no submit.
     function validate() {
@@ -288,8 +321,11 @@
 
   function handleReply(res) {
     addMessage('bot', res && res.reply ? res.reply : fallbackMessage());
+
+    // Поле ввода существует всегда. Сервер решает только, добавить ли к нему
+    // форму контактов — забрать клавиатуру он не может в принципе.
+    ensureComposer();
     if (res && res.form === 'contact') showContactForm();
-    else showComposer();
   }
 
   function withRequest(payload) {
@@ -302,7 +338,7 @@
         typing(false);
         // Never a dead end: hand over a phone number and keep the box open.
         addMessage('bot', fallbackMessage());
-        showComposer();
+        ensureComposer();
         if (window.console) console.warn('[nxai-widget]', err);
       })
       .then(function () { busy = false; });
@@ -317,6 +353,14 @@
   function sendContact(contact) {
     if (busy) return;
     addMessage('user', contact.name + ' · ' + contact.phone);
+
+    // Форму убирает сам факт отправки, а не поле `form` в ответе сервера.
+    // Если бы её снимал ответ, разовый сбой Redis стёр бы наполовину набранный
+    // телефон прямо из-под пальцев.
+    var form = foot.querySelector('.form');
+    if (form) form.remove();
+    ensureComposer();
+
     withRequest({ contact: contact });
   }
 
@@ -330,7 +374,7 @@
     if (!started) {
       started = true;
       addMessage('bot', cfg.greeting);
-      var ta = showComposer();
+      var ta = ensureComposer();
       if (window.matchMedia('(min-width:441px)').matches && ta) ta.focus();
     }
     scroll();

@@ -107,3 +107,39 @@ test('отправка контактов НЕ идёт через агента'
   assert.deepStrictEqual(c[0].map((x) => x.node), ['Check Quoted — Lead']);
   assert.deepStrictEqual(c[1].map((x) => x.node), ['Lead Agent']);
 });
+
+test('заявка помечается в Redis, и метка читается до решения о форме', () => {
+  // Без этого форма возвращалась на каждое следующее сообщение целый час:
+  // метка расчёта живёт в Redis, а session_id — в localStorage браузера.
+  // Человек, оставивший заявку, писал «доброе утро» и снова видел форму.
+  const mark = wf.nodes.find((n) => n.name === 'Mark Lead');
+  assert.ok(mark, 'узел Mark Lead пропал — форма будет возвращаться');
+  assert.strictEqual(mark.parameters.operation, 'set');
+  assert.match(mark.parameters.key, /^=lead:/);
+
+  const check = wf.nodes.find((n) => n.name === 'Check Lead');
+  assert.ok(check, 'узел Check Lead пропал');
+  assert.strictEqual(check.parameters.operation, 'get');
+  assert.match(check.parameters.key, /^=lead:/);
+
+  // Порядок обязателен: метку надо прочитать ДО того, как решается форма.
+  assert.deepStrictEqual(
+    wf.connections['Lead Agent'].main[0].map((x) => x.node), ['Check Lead']);
+  assert.deepStrictEqual(
+    wf.connections['Check Lead'].main[0].map((x) => x.node), ['Check Quoted']);
+  assert.deepStrictEqual(
+    wf.connections['Save Lead'].main[0].map((x) => x.node), ['Mark Lead']);
+});
+
+test('виджет никогда не забирает поле ввода', () => {
+  // Самая дорогая ошибка из возможных на лид-форме: форма контактов затирала
+  // поле ввода, и посетитель, который ещё выбирал, оказывался в тупике —
+  // либо заполняй, либо уходи. Поймано на живой странице.
+  const src = fs.readFileSync(path.join(__dirname, 'widget', 'widget.js'), 'utf8');
+  const body = src.slice(src.indexOf('function showContactForm'));
+  const upToEnd = body.slice(0, body.indexOf('function ensureComposer'));
+  assert.ok(!/foot\.innerHTML\s*=/.test(upToEnd),
+    'showContactForm снова затирает подвал целиком');
+  assert.ok(/foot\.insertBefore/.test(upToEnd),
+    'форма должна вставляться НАД полем ввода, а не вместо него');
+});

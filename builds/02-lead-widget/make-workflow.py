@@ -35,6 +35,12 @@ ESTIMATE_WORKFLOW_NAME = "02 Lead Widget — Calc Estimate"
 # ключ в Redis — нельзя: он либо есть, либо нет.
 QUOTED_TTL = 3600
 
+# Метка «по этой сессии заявка уже принята». Живёт дольше метки расчёта, и
+# намеренно: session_id лежит в localStorage браузера, поэтому человек
+# возвращается в ту же сессию завтра. Просить телефон у того, кто его уже
+# оставил, — значит выглядеть так, будто заявку потеряли.
+LEAD_TTL = 30 * 24 * 3600
+
 # Домены, которым разрешено обращаться к вебхуку. НЕ "*": открытый лид-вебхук —
 # это чужой бесплатный LLM за счёт клиента. Меняется на домен заказчика.
 ALLOWED_ORIGINS = "https://n-enterprise.ru,https://www.n-enterprise.ru"
@@ -429,12 +435,23 @@ FORM_GATE_GLUE = r"""
 // ---------------------------------------------------------------------------
 const envelope = $('Normalize Web Request').first().json;
 const agent = $('Lead Agent').first().json;
+
+// Заявка по этой сессии уже принята? Узел Redis подменяет элемент, поэтому
+// читаем его по имени. Ключ живёт 30 дней: session_id лежит в localStorage,
+// и человек возвращается в ту же сессию не только сегодня.
+let alreadyLead = false;
+try {
+  alreadyLead = wasQuoted($('Check Lead').first().json, 'already_lead');
+} catch (e) {
+  alreadyLead = false;
+}
 const FALLBACK = __HANDOVER__;
 
 return $input.all().map((item) => {
   const decided = decideForm({
     quoted: wasQuoted(item.json, 'quoted'),
     isContact: envelope.is_contact === true,
+    alreadyLead,
     agentReply: agent.output,
     fallbackReply: FALLBACK,
   });
@@ -785,6 +802,21 @@ def build():
             520,
         ),
         node(
+            "Check Lead",
+            "n8n-nodes-base.redis",
+            1,
+            {
+                "operation": "get",
+                "propertyName": "already_lead",
+                "key": "=lead:{{ $('Normalize Web Request').first().json.session_id }}",
+                "options": {},
+            },
+            1360,
+            320,
+            {"credentials": {"redis": {"id": "REPLACE_ON_IMPORT", "name": "Redis"}},
+             "onError": "continueRegularOutput"},
+        ),
+        node(
             "Check Quoted",
             "n8n-nodes-base.redis",
             1,
@@ -895,10 +927,29 @@ def build():
             # потерянное доверие посетителя не видно нигде.
             {"onError": "continueRegularOutput"},
         ),
+        node(
+            "Mark Lead",
+            "n8n-nodes-base.redis",
+            1,
+            {
+                "operation": "set",
+                "key": "=lead:{{ $('Normalize Web Request').first().json.session_id }}",
+                "value": "1",
+                "keyType": "string",
+                "expire": True,
+                "ttl": LEAD_TTL,
+            },
+            2600,
+            620,
+            {"credentials": {"redis": {"id": "REPLACE_ON_IMPORT", "name": "Redis"}},
+             # Redis лёг — человек всё равно получает подтверждение. Худшее,
+             # что будет: форма покажется ещё раз. Это дешевле, чем ошибка.
+             "onError": "continueRegularOutput"},
+        ),
         reply_node(
             "Reply — Lead Saved",
             "={{ $('Build Lead').first().json.reply }}",
-            2600,
+            2800,
             620,
         ),
         reply_node(
@@ -971,10 +1022,12 @@ def build():
                 [{"node": "Reply — Lead Rejected", "type": "main", "index": 0}],
             ]
         },
-        "Save Lead": {"main": [[{"node": "Reply — Lead Saved", "type": "main", "index": 0}]]},
+        "Save Lead": {"main": [[{"node": "Mark Lead", "type": "main", "index": 0}]]},
+        "Mark Lead": {"main": [[{"node": "Reply — Lead Saved", "type": "main", "index": 0}]]},
         "Reply — Lead Saved": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
         "Reply — Lead Rejected": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
-        "Lead Agent": {"main": [[{"node": "Check Quoted", "type": "main", "index": 0}]]},
+        "Lead Agent": {"main": [[{"node": "Check Lead", "type": "main", "index": 0}]]},
+        "Check Lead": {"main": [[{"node": "Check Quoted", "type": "main", "index": 0}]]},
         "Check Quoted": {"main": [[{"node": "Decide Form", "type": "main", "index": 0}]]},
         "Decide Form": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
         "calc_estimate": {
