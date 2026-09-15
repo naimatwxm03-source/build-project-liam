@@ -201,14 +201,14 @@
         "model": {
           "__rl": true,
           "mode": "list",
-          "value": "gpt://b1gg2h3lj0e41o47fkoo/yandexgpt-lite/latest"
+          "value": "gpt://b1gg2h3lj0e41o47fkoo/yandexgpt-5.1/latest"
         },
         "options": {
           "temperature": 0.3
         }
       },
-      "id": "yandexgpt-lite-(yandex-ai-studio)",
-      "name": "YandexGPT Lite (Yandex AI Studio)",
+      "id": "yandexgpt-pro-5.1-(yandex-ai-studio)",
+      "name": "YandexGPT Pro 5.1 (Yandex AI Studio)",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
@@ -538,7 +538,7 @@
         ]
       ]
     },
-    "YandexGPT Lite (Yandex AI Studio)": {
+    "YandexGPT Pro 5.1 (Yandex AI Studio)": {
       "ai_languageModel": [
         [
           {
