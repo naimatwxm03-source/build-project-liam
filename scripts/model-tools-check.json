@@ -1,0 +1,23 @@
+{
+  "model": "gpt://b1gg2h3lj0e41o47fkoo/yandexgpt-5.1/latest",
+  "messages": [
+    { "role": "user", "content": "Посчитай стоимость остекления лоджии 6 метров, тёплое." }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "calc_estimate",
+        "description": "Считает стоимость остекления балкона по конфигурации и типу остекления",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "configuration": { "type": "string", "description": "прямой 3 м, П-образный или лоджия" },
+            "glazing": { "type": "string", "description": "тёплое или холодное" }
+          },
+          "required": ["configuration", "glazing"]
+        }
+      }
+    }
+  ]
+}
