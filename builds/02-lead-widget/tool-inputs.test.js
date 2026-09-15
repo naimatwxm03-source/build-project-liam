@@ -166,3 +166,18 @@ test('необязательные поля прямо запрещают мод
       `${field}: модель снова начнёт добывать это поле вопросами`);
   }
 });
+
+test('метка расчёта читается ДО лимита, а не после', () => {
+  // Лимит защищает бюджет клиента от чужого человека — а тот до расчёта не
+  // доходит. Посетитель, получивший вилку, самый ценный в воронке, и обрывать
+  // разговор именно с ним нельзя. Порядок узлов и есть это правило.
+  const gate = wf.nodes.find((n) => n.name === 'Check Quoted — Rate');
+  assert.ok(gate, 'узел Check Quoted — Rate пропал: лимит снова отсечёт покупателя');
+  assert.strictEqual(gate.parameters.operation, 'get');
+  assert.match(gate.parameters.key, /^=quoted:/);
+
+  assert.deepStrictEqual(
+    wf.connections['Valid Request?'].main[0].map((x) => x.node), ['Check Quoted — Rate']);
+  assert.deepStrictEqual(
+    wf.connections['Check Quoted — Rate'].main[0].map((x) => x.node), ['Rate Limit']);
+});

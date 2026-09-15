@@ -97,7 +97,7 @@
     },
     {
       "parameters": {
-        "jsCode": "/**\n * Разбор ответа Redis INCR и решение по лимиту запросов.\n *\n * Виджет стоит на чужом сайте и открыт всему интернету. Без лимита один\n * человек с консолью браузера за ночь выставляет клиенту счёт за Yandex AI\n * Studio. Поэтому лимит — часть сборки, а не опция.\n *\n * Почему не читаем ответ Redis напрямую: узел Redis в n8n кладёт результат\n * INCR под именем ключа, а ключ у нас собирается выражением. Полагаться на\n * форму ответа — значит однажды получить `undefined > 20 === false` и молча\n * остаться без защиты, ничего при этом не заметив. Берём первое числовое\n * значение, какой бы ни была обёртка.\n */\n'use strict';\n\nconst WINDOW_SECONDS = 600; // 10 минут — обязано совпадать с TTL в узле Redis\nconst MAX_MESSAGES = 20;\n\nfunction readCount(redisJson) {\n  if (redisJson == null) return null;\n  if (typeof redisJson === 'number') return Number.isFinite(redisJson) ? redisJson : null;\n  if (typeof redisJson === 'string') return /^\\d+$/.test(redisJson.trim()) ? Number(redisJson.trim()) : null;\n  if (typeof redisJson !== 'object') return null;\n  for (const v of Object.values(redisJson)) {\n    if (typeof v === 'number' && Number.isFinite(v)) return v;\n    if (typeof v === 'string' && /^\\d+$/.test(v.trim())) return Number(v.trim());\n  }\n  return null;\n}\n\n/**\n * Если Redis недоступен или ответил непонятно — пропускаем запрос.\n *\n * Это осознанный выбор в пользу доступности. Отказать всем посетителям сайта\n * из-за сбоя вспомогательного сервиса дороже, чем на несколько минут остаться\n * без лимита: первое стоит клиенту всех лидов, второе — нескольких рублей.\n * Но факт помечается флагом, чтобы в логе исполнения было видно, что защита\n * не сработала, а не казалось, что всё в порядке.\n */\nfunction decide(count) {\n  if (count == null) {\n    return { rate_count: null, rate_limited: false, rate_degraded: true };\n  }\n  return { rate_count: count, rate_limited: count > MAX_MESSAGES, rate_degraded: false };\n}\n\nfunction limitReply() {\n  return 'Слишком много сообщений подряд — сделайте паузу на пару минут.\\n\\n' +\n    'Если вопрос срочный, позвоните напрямую: так быстрее.';\n}\n\n// ---------------------------------------------------------------------------\n//   источник: builds/02-lead-widget/rate-limit.js\n//\n// Узел Redis подменяет элемент своим ответом, поэтому конверт берём обратно из\n// узла нормализации, а не из $json — иначе session_id потеряется ровно здесь.\n// ---------------------------------------------------------------------------\nconst envelope = $('Normalize Web Request').first().json;\n\nreturn $input.all().map((item) => {\n  const verdict = decide(readCount(item.json));\n  return {\n    json: {\n      ...envelope,\n      ...verdict,\n      reply: verdict.rate_limited ? limitReply() : '',\n    },\n  };\n});\n"
+        "jsCode": "/**\n * Разбор ответа Redis INCR и решение по лимиту запросов.\n *\n * Виджет стоит на чужом сайте и открыт всему интернету. Без лимита один\n * человек с консолью браузера за ночь выставляет клиенту счёт за Yandex AI\n * Studio. Поэтому лимит — часть сборки, а не опция.\n *\n * Почему не читаем ответ Redis напрямую: узел Redis в n8n кладёт результат\n * INCR под именем ключа, а ключ у нас собирается выражением. Полагаться на\n * форму ответа — значит однажды получить `undefined > 20 === false` и молча\n * остаться без защиты, ничего при этом не заметив. Берём первое числовое\n * значение, какой бы ни была обёртка.\n */\n'use strict';\n\nconst WINDOW_SECONDS = 600; // 10 минут — обязано совпадать с TTL в узле Redis\nconst MAX_MESSAGES = 20;\n\nfunction readCount(redisJson) {\n  if (redisJson == null) return null;\n  if (typeof redisJson === 'number') return Number.isFinite(redisJson) ? redisJson : null;\n  if (typeof redisJson === 'string') return /^\\d+$/.test(redisJson.trim()) ? Number(redisJson.trim()) : null;\n  if (typeof redisJson !== 'object') return null;\n  for (const v of Object.values(redisJson)) {\n    if (typeof v === 'number' && Number.isFinite(v)) return v;\n    if (typeof v === 'string' && /^\\d+$/.test(v.trim())) return Number(v.trim());\n  }\n  return null;\n}\n\n/**\n * Если Redis недоступен или ответил непонятно — пропускаем запрос.\n *\n * Это осознанный выбор в пользу доступности. Отказать всем посетителям сайта\n * из-за сбоя вспомогательного сервиса дороже, чем на несколько минут остаться\n * без лимита: первое стоит клиенту всех лидов, второе — нескольких рублей.\n * Но факт помечается флагом, чтобы в логе исполнения было видно, что защита\n * не сработала, а не казалось, что всё в порядке.\n */\nfunction decide(count, exempt) {\n  if (count == null) {\n    return { rate_count: null, rate_limited: false, rate_degraded: true,\n             rate_exempt: exempt === true };\n  }\n  return {\n    rate_count: count,\n    // Тому, кому уже показали цену, лимит не применяется. Лимит существует,\n    // чтобы чужой человек не жёг бюджет клиента на LLM, — а такой человек до\n    // расчёта не доходит. Зато посетитель, задавший двенадцать вопросов и\n    // получивший вилку, — самый ценный в воронке, и старое правило обрывало\n    // разговор именно с ним.\n    rate_limited: exempt === true ? false : count > MAX_MESSAGES,\n    rate_degraded: false,\n    rate_exempt: exempt === true,\n  };\n}\n\n/**\n * Была ли этой сессии показана цена. ЧИТАЕТСЯ СТРОГО.\n *\n * Направление безопасности здесь такое же, как у метки заявки, и обратное\n * метке расчёта в воротах формы: ошибочное «да» означает «лимит не\n * применяется», то есть открытую дверь к бюджету клиента. Поэтому считается\n * только явное непустое значение под своим именем — никакого перебора полей.\n */\nfunction wasQuotedStrict(redisJson, propertyName) {\n  if (redisJson == null || typeof redisJson !== 'object') return false;\n  const v = redisJson[propertyName];\n  if (v === undefined || v === null) return false;\n  return String(v).trim() !== '';\n}\n\nfunction limitReply() {\n  return 'Слишком много сообщений подряд — сделайте паузу на пару минут.\\n\\n' +\n    'Если вопрос срочный, позвоните напрямую: так быстрее.';\n}\n\n// ---------------------------------------------------------------------------\n//   источник: builds/02-lead-widget/rate-limit.js\n//\n// Узел Redis подменяет элемент своим ответом, поэтому конверт берём обратно из\n// узла нормализации, а не из $json — иначе session_id потеряется ровно здесь.\n// ---------------------------------------------------------------------------\nconst envelope = $('Normalize Web Request').first().json;\n\n// Освобождение от лимита для того, кому уже показали цену. Читается СТРОГО:\n// ошибочное «да» здесь открывает дверь к бюджету клиента, а не задерживает\n// форму на ход. Узел Redis при отсутствии ключа отдаёт дальше предыдущий\n// элемент, в котором перебор полей нашёл бы что угодно непустое.\nlet exempt = false;\ntry {\n  exempt = wasQuotedStrict($('Check Quoted — Rate').first().json, 'quoted_rate');\n} catch (e) {\n  exempt = false;\n}\n\nreturn $input.all().map((item) => {\n  const verdict = decide(readCount(item.json), exempt);\n  return {\n    json: {\n      ...envelope,\n      ...verdict,\n      reply: verdict.rate_limited ? limitReply() : '',\n    },\n  };\n});\n"
       },
       "id": "check-rate-limit",
       "name": "Check Rate Limit",
@@ -397,6 +397,29 @@
         1380,
         520
       ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "quoted_rate",
+        "key": "=quoted:{{ $json.session_id }}",
+        "options": {}
+      },
+      "id": "check-quoted---rate",
+      "name": "Check Quoted — Rate",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        256,
+        880
+      ],
+      "credentials": {
+        "redis": {
+          "id": "REPLACE_ON_IMPORT",
+          "name": "Redis"
+        }
+      },
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -855,7 +878,7 @@
       "main": [
         [
           {
-            "node": "Rate Limit",
+            "node": "Check Quoted — Rate",
             "type": "main",
             "index": 0
           }
@@ -863,6 +886,17 @@
         [
           {
             "node": "Reply — Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Quoted — Rate": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit",
             "type": "main",
             "index": 0
           }

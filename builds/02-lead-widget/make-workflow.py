@@ -341,8 +341,19 @@ RATE_LIMIT_GLUE = r"""
 // ---------------------------------------------------------------------------
 const envelope = $('Normalize Web Request').first().json;
 
+// Освобождение от лимита для того, кому уже показали цену. Читается СТРОГО:
+// ошибочное «да» здесь открывает дверь к бюджету клиента, а не задерживает
+// форму на ход. Узел Redis при отсутствии ключа отдаёт дальше предыдущий
+// элемент, в котором перебор полей нашёл бы что угодно непустое.
+let exempt = false;
+try {
+  exempt = wasQuotedStrict($('Check Quoted — Rate').first().json, 'quoted_rate');
+} catch (e) {
+  exempt = false;
+}
+
 return $input.all().map((item) => {
-  const verdict = decide(readCount(item.json));
+  const verdict = decide(readCount(item.json), exempt);
   return {
     json: {
       ...envelope,
@@ -832,6 +843,22 @@ def build():
             520,
         ),
         node(
+            "Check Quoted — Rate",
+            "n8n-nodes-base.redis",
+            1,
+            {
+                "operation": "get",
+                "propertyName": "quoted_rate",
+                "key": "=quoted:{{ $json.session_id }}",
+                "options": {},
+            },
+            256,
+            880,
+            {"credentials": {"redis": {"id": "REPLACE_ON_IMPORT", "name": "Redis"}},
+             # Redis недоступен — лимит просто работает как раньше.
+             "onError": "continueRegularOutput"},
+        ),
+        node(
             "Check Lead",
             "n8n-nodes-base.redis",
             1,
@@ -1014,10 +1041,12 @@ def build():
         "Normalize Web Request": {"main": [[{"node": "Valid Request?", "type": "main", "index": 0}]]},
         "Valid Request?": {
             "main": [
-                [{"node": "Rate Limit", "type": "main", "index": 0}],
+                [{"node": "Check Quoted — Rate", "type": "main", "index": 0}],
                 [{"node": "Reply — Invalid", "type": "main", "index": 0}],
             ]
         },
+        "Check Quoted — Rate": {
+            "main": [[{"node": "Rate Limit", "type": "main", "index": 0}]]},
         "Rate Limit": {"main": [[{"node": "Check Rate Limit", "type": "main", "index": 0}]]},
         "Check Rate Limit": {"main": [[{"node": "Rate Limited?", "type": "main", "index": 0}]]},
         "Rate Limited?": {

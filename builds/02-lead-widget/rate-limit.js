@@ -37,11 +37,37 @@ function readCount(redisJson) {
  * Но факт помечается флагом, чтобы в логе исполнения было видно, что защита
  * не сработала, а не казалось, что всё в порядке.
  */
-function decide(count) {
+function decide(count, exempt) {
   if (count == null) {
-    return { rate_count: null, rate_limited: false, rate_degraded: true };
+    return { rate_count: null, rate_limited: false, rate_degraded: true,
+             rate_exempt: exempt === true };
   }
-  return { rate_count: count, rate_limited: count > MAX_MESSAGES, rate_degraded: false };
+  return {
+    rate_count: count,
+    // Тому, кому уже показали цену, лимит не применяется. Лимит существует,
+    // чтобы чужой человек не жёг бюджет клиента на LLM, — а такой человек до
+    // расчёта не доходит. Зато посетитель, задавший двенадцать вопросов и
+    // получивший вилку, — самый ценный в воронке, и старое правило обрывало
+    // разговор именно с ним.
+    rate_limited: exempt === true ? false : count > MAX_MESSAGES,
+    rate_degraded: false,
+    rate_exempt: exempt === true,
+  };
+}
+
+/**
+ * Была ли этой сессии показана цена. ЧИТАЕТСЯ СТРОГО.
+ *
+ * Направление безопасности здесь такое же, как у метки заявки, и обратное
+ * метке расчёта в воротах формы: ошибочное «да» означает «лимит не
+ * применяется», то есть открытую дверь к бюджету клиента. Поэтому считается
+ * только явное непустое значение под своим именем — никакого перебора полей.
+ */
+function wasQuotedStrict(redisJson, propertyName) {
+  if (redisJson == null || typeof redisJson !== 'object') return false;
+  const v = redisJson[propertyName];
+  if (v === undefined || v === null) return false;
+  return String(v).trim() !== '';
 }
 
 function limitReply() {
@@ -50,5 +76,6 @@ function limitReply() {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { readCount, decide, limitReply, MAX_MESSAGES, WINDOW_SECONDS };
+  module.exports = { readCount, decide, wasQuotedStrict, limitReply,
+                     MAX_MESSAGES, WINDOW_SECONDS };
 }
