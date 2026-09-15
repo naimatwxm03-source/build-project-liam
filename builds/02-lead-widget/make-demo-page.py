@@ -38,8 +38,27 @@ NEW_FOOTER = (
 )
 
 
+# Шапка страницы. В репозитории `demo.html` начинается сразу с <title> — она
+# писалась под обёртку артефакта, которая сама подставляет charset. Отданная
+# Nginx как есть, такая страница НЕ СООБЩАЕТ браузеру кодировку, и весь русский
+# текст превращается в «Р”Р•РњРћ»: UTF-8, прочитанный как windows-1251.
+#
+# Поймано только в живом браузере. Ни один curl этого не увидит: кракозябры
+# появляются на этапе отрисовки, а байты по проводу идут правильные.
+#
+# Лечится здесь, а не `charset utf-8;` в Nginx: страница должна оставаться
+# правильной, куда бы её ни положили — в том числе на сервер клиента.
+HEAD = (
+    '<!doctype html>\n'
+    '<html lang="ru">\n'
+    '<meta charset="utf-8">\n'
+    '<meta name="viewport" content="width=device-width, initial-scale=1, '
+    'viewport-fit=cover">\n'
+)
+
+
 def build() -> str:
-    html = (HERE / "demo.html").read_text(encoding="utf-8")
+    html = HEAD + (HERE / "demo.html").read_text(encoding="utf-8")
 
     html = DEMO_SCRIPTS.sub("", html)
 
@@ -61,6 +80,8 @@ def build() -> str:
             raise SystemExit("в боевой странице остался %s" % bad)
     if ENDPOINT not in html:
         raise SystemExit("в боевой странице нет data-endpoint")
+    if '<meta charset="utf-8">' not in html:
+        raise SystemExit("в боевой странице нет charset — весь русский текст сломается")
 
     return html
 
