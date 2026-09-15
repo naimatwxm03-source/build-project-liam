@@ -75,6 +75,63 @@ QDRANT_COLLECTION = "kb_demo_balkon"
 # и узел-инструмент придётся перевыбрать из выпадающего списка.
 ESTIMATE_WORKFLOW_ID = "uS4PnrfyzBxTT0hd"
 
+# ---------------------------------------------------------------------------
+# Как узел-инструмент передаёт аргументы в подworkflow расчёта.
+#
+# ЭТА ФОРМА СНЯТА С ЖИВОГО УЗЛА, а не выведена из документации. Два прошлых
+# варианта были угаданы, и оба молча не работали: модели просто нечем было
+# заполнить поля, и весь запрос приходил одной строкой в `input`.
+#
+# Три детали, которые не угадываются:
+#   1. поле, заполняемое моделью, — это выражение $fromAI(имя, описание, тип);
+#      комментарий /*n8n-auto-generated-fromAI-override*/ n8n ставит сам;
+#   2. пустое поле — это ОТСУТСТВИЕ ключа в value, а не пустая строка;
+#   3. schema обязана перечислять ВСЕ поля подworkflow, включая пустые,
+#      и у всех, кроме session_id, стоит "removed": false.
+#
+# session_id приходит из конверта, а не от модели: по нему подworkflow ставит
+# метку расчёта, и подмена ключа открыла бы форму контактов в чужой сессии.
+#
+# profile_tier и address намеренно НЕ заполняются моделью. С пустым описанием
+# модель их выдумывала — присылала «стандарт» и «Самара», которых посетитель
+# не говорил. Выдуманный класс профиля сужает вилку без оснований, а выдуманный
+# адрес уводил расчёт в ветку уточнения адреса и съедал цену целиком.
+# ---------------------------------------------------------------------------
+ESTIMATE_TOOL_FIELDS = [
+    "session_id", "configuration", "glazing", "profile_tier",
+    "floor", "extension", "address",
+]
+
+# Заполняются моделью. Описание пустое — ровно как в проверенном узле.
+# Осмысленные описания стоит добавлять отдельным шагом и проверять живым
+# прогоном: это меняет поведение модели, а не только текст.
+ESTIMATE_TOOL_AI_FIELDS = ["configuration", "glazing", "floor", "extension"]
+
+
+def _from_ai(name):
+    return ("={{ /*n8n-auto-generated-fromAI-override*/ "
+            "$fromAI('%s', ``, 'string') }}" % name)
+
+
+ESTIMATE_TOOL_INPUTS = {
+    "mappingMode": "defineBelow",
+    "value": dict(
+        [("session_id", "={{ $('Normalize Web Request').first().json.session_id }}")]
+        + [(f, _from_ai(f)) for f in ESTIMATE_TOOL_AI_FIELDS]
+    ),
+    "matchingColumns": [],
+    "schema": [
+        dict({
+            "id": f, "displayName": f, "required": False, "defaultMatch": False,
+            "display": True, "canBeUsedToMatch": True, "type": "string",
+        }, **({} if f == "session_id" else {"removed": False}))
+        for f in ESTIMATE_TOOL_FIELDS
+    ],
+    "attemptToConvertTypes": False,
+    "convertFieldsToString": True,
+}
+
+
 # Системный промпт.
 #
 # ПОРЯДОК И КОЛИЧЕСТВО ПОВТОРОВ ЗДЕСЬ ВАЖНЕЕ ФОРМУЛИРОВОК. При противоречии
@@ -618,19 +675,7 @@ def build():
                     "mode": "list",
                     "cachedResultName": ESTIMATE_WORKFLOW_NAME,
                 },
-                "workflowInputs": {
-                    "mappingMode": "defineBelow",
-                    "value": {
-                        # session_id — из конверта, а не от модели: по нему
-                        # подworkflow ставит метку расчёта, и подмена ключа
-                        # открыла бы форму чужой сессии.
-                        "session_id": "={{ $('Normalize Web Request').first().json.session_id }}",
-                    },
-                    "matchingColumns": [],
-                    "schema": [],
-                    "attemptToConvertTypes": False,
-                    "convertFieldsToString": True,
-                },
+                "workflowInputs": ESTIMATE_TOOL_INPUTS,
             },
             1380,
             520,

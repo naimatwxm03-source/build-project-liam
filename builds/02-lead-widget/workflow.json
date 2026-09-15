@@ -306,10 +306,84 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "session_id": "={{ $('Normalize Web Request').first().json.session_id }}"
+            "session_id": "={{ $('Normalize Web Request').first().json.session_id }}",
+            "configuration": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('configuration', ``, 'string') }}",
+            "glazing": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('glazing', ``, 'string') }}",
+            "floor": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('floor', ``, 'string') }}",
+            "extension": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('extension', ``, 'string') }}"
           },
           "matchingColumns": [],
-          "schema": [],
+          "schema": [
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "configuration",
+              "displayName": "configuration",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "glazing",
+              "displayName": "glazing",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "profile_tier",
+              "displayName": "profile_tier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "floor",
+              "displayName": "floor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "extension",
+              "displayName": "extension",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "address",
+              "displayName": "address",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
           "attemptToConvertTypes": false,
           "convertFieldsToString": true
         }
