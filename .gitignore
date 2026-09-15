@@ -8,3 +8,10 @@ dist/
 .DS_Store
 credentials*.json
 *-credentials.json
+
+# Исключение: страница демо — это то, что кладут на сервер, а не промежуточный
+# артефакт сборки. Наимат забирает её через git pull на Mac и копирует на VPS,
+# и требовать ради двух файлов запуска питона на его машине — лишний шаг,
+# который однажды не сделают. Дрейф ловит `make-demo-page.py --check` в test.sh.
+!builds/02-lead-widget/dist/
+!builds/02-lead-widget/dist/*

@@ -5,3 +5,4 @@ cd "$(dirname "$0")"
 node --test ./*.test.js
 python3 make-workflow.py --check
 python3 ingest-kb.py --dry-run > /dev/null && echo "kb/faq.md режется без ошибок"
+python3 make-demo-page.py --check
