@@ -78,7 +78,12 @@ ESTIMATE_WORKFLOW_ID = "uS4PnrfyzBxTT0hd"
 # ID таблицы лидов в ЭТОМ экземпляре n8n. Как и ID подworkflow расчёта, он
 # инстанс-специфичен: на другой инсталляции таблицу надо создать заново и
 # перевыбрать в узле Save Lead.
-LEADS_TABLE_ID = "REPLACE_ON_IMPORT"
+#
+# Прописан здесь, а не оставлен REPLACE_ON_IMPORT, по той же причине, что и
+# errorWorkflow: иначе узел Save Lead приходится перевыбирать руками после
+# КАЖДОГО импорта, и однажды его не перевыберут — лиды пойдут в никуда, а
+# посетитель всё равно услышит «заявка принята».
+LEADS_TABLE_ID = "ukopT44JANYoasae"
 
 # Error Workflow — «00 Error Alerts — VK». ID инстанс-специфичен, как и ID
 # подworkflow расчёта.

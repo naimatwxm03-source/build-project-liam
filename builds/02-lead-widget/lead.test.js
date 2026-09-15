@@ -119,6 +119,19 @@ test('без имени ответ не ломается', () => {
   assert.ok(!r.includes('**'), 'пустой телефон не должен оставлять пустую разметку');
 });
 
+// Заголовок CSV — первая строка, НЕ начинающаяся с «#»: рядом со схемой лежат
+// комментарии с типами колонок, потому что тип колонки CSV не передаёт, а
+// ошибка в типе не падает — она молча портит данные (phone как Number съел «+»).
+function readHeader() {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  return fs.readFileSync(path.join(__dirname, 'leads-schema.csv'), 'utf8')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'))[0]
+    .split(',');
+}
+
 // --- стык с таблицей n8n -----------------------------------------------------
 
 test('колонки таблицы совпадают с генератором', () => {
@@ -126,8 +139,7 @@ test('колонки таблицы совпадают с генератором
   // и менеджер получает отчёт, который выглядит полным, но им не является.
   const fs = require('node:fs');
   const path = require('node:path');
-  const header = fs.readFileSync(path.join(__dirname, 'leads-schema.csv'), 'utf8')
-    .split('\n')[0].trim().split(',');
+  const header = readHeader();
   const gen = fs.readFileSync(path.join(__dirname, 'make-workflow.py'), 'utf8');
   const block = gen.match(/LEAD_COLUMNS = \[([\s\S]*?)\]/);
   assert.ok(block, 'LEAD_COLUMNS пропал из генератора');
@@ -138,8 +150,7 @@ test('колонки таблицы совпадают с генератором
 test('строка лида отдаёт ровно те поля, что ждёт таблица', () => {
   const fs = require('node:fs');
   const path = require('node:path');
-  const header = fs.readFileSync(path.join(__dirname, 'leads-schema.csv'), 'utf8')
-    .split('\n')[0].trim().split(',');
+  const header = readHeader();
   const r = L.buildLead({ envelope: consented, quoted });
   assert.deepStrictEqual(Object.keys(r.row).sort(), header.slice().sort());
 });

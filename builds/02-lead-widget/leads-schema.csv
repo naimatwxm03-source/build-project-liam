@@ -1,2 +1,13 @@
+# Типы колонок в n8n Data Table — CSV их не передаёт, а ошибка в типе
+# не падает, а молча портит данные.
+#
+# String:  session_id, created_at, channel, name, phone, address_raw,
+#          address_clean, address_note, configuration, glazing, review_reason
+# Number:  price_low, price_high
+# Boolean: consent, needs_review
+#
+# phone — ТОЛЬКО String. Как Number он теряет «+», потерял бы ведущий ноль,
+# а дедупликация лида в Bitrix24 (B10) сравнивает строки. Поймано на живом
+# прогоне: «+79171234567» легло в таблицу как 79171234567.
 session_id,created_at,channel,name,phone,consent,address_raw,address_clean,address_note,price_low,price_high,configuration,glazing,needs_review,review_reason
 SAMPLE-DELETE-ME,2026-09-15T09:00:00.000Z,web,Пример Удалить,+70000000000,true,,,адрес не указан,0,0,,,false,Пример строки — удалить после импорта
