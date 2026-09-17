@@ -116,6 +116,11 @@ LEAD_COLUMNS = [
     "address_raw", "address_clean", "address_note",
     "price_low", "price_high", "configuration", "glazing",
     "needs_review", "review_reason",
+    # B10. Строка в Data Table — это и есть таблица аудита, которой требует
+    # CLAUDE.md: по ней видно, что мы отправили в чужую CRM и что она ответила.
+    # Без этих двух колонок на вопрос «лид точно ушёл в Bitrix?» ответить
+    # нечем, кроме «кажется, да».
+    "crm_lead_id", "crm_status",
 ]
 
 
@@ -563,12 +568,65 @@ return [{
 }];
 """
 
+PLAN_BITRIX_GLUE = r"""
+
+// ---------------------------------------------------------------------------
+//   источник: builds/02-lead-widget/bitrix.js
+//
+// Решает, что отправить в Bitrix: новый лид или комментарий к найденному
+// дублю. Строку лида берём по имени узла — предыдущий узел HTTP подменил
+// $json своим ответом, и в нём лида уже нет.
+//
+// Узел поиска дублей стоит с onError: continueRegularOutput, поэтому здесь
+// в $json может лежать не ответ Bitrix, а объект ошибки. Это штатный случай:
+// planCall на непонятном входе создаёт новый лид.
+// ---------------------------------------------------------------------------
+const lead = $('Build Lead').first().json;
+const dupResponse = $json && $json.result !== undefined ? $json : null;
+const plan = planCall(lead, dupResponse);
+
+return [{
+  json: {
+    ...lead,
+    bitrix_method: plan.method,
+    bitrix_body: plan.body,
+    bitrix_existing_id: plan.existing_id,
+  },
+}];
+"""
+
+READ_BITRIX_GLUE = r"""
+
+// ---------------------------------------------------------------------------
+//   источник: builds/02-lead-widget/bitrix.js
+//
+// Превращает ответ Bitrix в две колонки строки аудита. Ответа может не быть
+// вовсе — портал недоступен, вебхук отозвали, тариф кончился. Ни один из этих
+// случаев не имеет права стоить нам телефона человека, поэтому дальше по
+// ветке всё равно идёт запись в Data Table.
+// ---------------------------------------------------------------------------
+const planned = $('Plan Bitrix').first().json;
+const plan = {
+  method: planned.bitrix_method,
+  existing_id: planned.bitrix_existing_id,
+  body: planned.bitrix_body,
+};
+const outcome = readResult($json && typeof $json === 'object' ? $json : null, plan);
+
+// bitrix_body наружу не отдаём: он большой, а в таблицу не пишется.
+const { bitrix_body, ...rest } = planned;
+return [{ json: { ...rest, ...outcome } }];
+"""
+
+
 CODE_NODES = {
     "Normalize Web Request": ("normalize-web.js", NORMALIZE_GLUE),
     "Check Rate Limit": ("rate-limit.js", RATE_LIMIT_GLUE),
     "Decide Form": ("form-gate.js", FORM_GATE_GLUE),
     "Check Lead Address": ("address.js", CHECK_LEAD_ADDRESS_GLUE),
     "Build Lead": ("lead.js", BUILD_LEAD_GLUE),
+    "Plan Bitrix": ("bitrix.js", PLAN_BITRIX_GLUE),
+    "Read Bitrix Result": ("bitrix.js", READ_BITRIX_GLUE),
 }
 
 ESTIMATE_CODE_NODES = {
@@ -964,6 +1022,55 @@ def build():
             2200,
             700,
         ),
+        # --- B10: Bitrix24 ---------------------------------------------------
+        # Секретный код вебхука лежит в пути URL, поэтому ни один тип
+        # credential в n8n его не спрячет. Он читается из переменной окружения
+        # BITRIX_WEBHOOK_BASE: в docker-compose.yml, а не в этом файле и не в
+        # экспортированном JSON. Экспорт workflow — штатный способ утечки,
+        # об этом прямо сказано в CLAUDE.md, и однажды такой экспорт уже
+        # уезжал в переписку.
+        node(
+            "Bitrix — Find Duplicate",
+            "n8n-nodes-base.httpRequest",
+            4.2,
+            {
+                "method": "POST",
+                "url": "={{ $env.BITRIX_WEBHOOK_BASE }}crm.duplicate.findbycomm",
+                "sendBody": True,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ entity_type: 'LEAD', "
+                            "type: 'PHONE', values: [$json.phone] }) }}",
+                "options": {"timeout": 8000},
+            },
+            2400,
+            560,
+            # Поиск дублей не сработал — создаём новый лид. Лишний лид
+            # менеджер склеит; потерянный не найдёт никто.
+            {"onError": "continueRegularOutput"},
+        ),
+        node("Plan Bitrix", "n8n-nodes-base.code", 2,
+             {"jsCode": codes["Plan Bitrix"]}, 2560, 560),
+        node(
+            "Bitrix — Call",
+            "n8n-nodes-base.httpRequest",
+            4.2,
+            {
+                "method": "POST",
+                # Метод выбрал Code-узел: новый лид или комментарий к дублю.
+                "url": "={{ $env.BITRIX_WEBHOOK_BASE }}{{ $json.bitrix_method }}",
+                "sendBody": True,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify($json.bitrix_body) }}",
+                "options": {"timeout": 12000},
+            },
+            2720,
+            560,
+            # CRM недоступна — строка всё равно ляжет в Data Table с пометкой
+            # в crm_status. Чужая CRM не решает судьбу нашего лида.
+            {"onError": "continueRegularOutput"},
+        ),
+        node("Read Bitrix Result", "n8n-nodes-base.code", 2,
+             {"jsCode": codes["Read Bitrix Result"]}, 2880, 560),
         node(
             "Save Lead",
             "n8n-nodes-base.dataTable",
@@ -977,7 +1084,7 @@ def build():
                 },
                 "options": {},
             },
-            2400,
+            3040,
             620,
             # Таблица недоступна — человек всё равно получает подтверждение, а
             # не сообщение об ошибке. Потерянная строка видна в Error Workflow;
@@ -996,7 +1103,7 @@ def build():
                 "expire": True,
                 "ttl": LEAD_TTL,
             },
-            2600,
+            3200,
             620,
             {"credentials": {"redis": {"id": "REPLACE_ON_IMPORT", "name": "Redis"}},
              # Redis лёг — человек всё равно получает подтверждение. Худшее,
@@ -1006,7 +1113,7 @@ def build():
         reply_node(
             "Reply — Lead Saved",
             "={{ $('Build Lead').first().json.reply }}",
-            2800,
+            3360,
             620,
         ),
         reply_node(
@@ -1077,10 +1184,18 @@ def build():
         "Build Lead": {"main": [[{"node": "Lead Valid?", "type": "main", "index": 0}]]},
         "Lead Valid?": {
             "main": [
-                [{"node": "Save Lead", "type": "main", "index": 0}],
+                [{"node": "Bitrix — Find Duplicate", "type": "main", "index": 0}],
                 [{"node": "Reply — Lead Rejected", "type": "main", "index": 0}],
             ]
         },
+        "Bitrix — Find Duplicate": {
+            "main": [[{"node": "Plan Bitrix", "type": "main", "index": 0}]]},
+        "Plan Bitrix": {"main": [[{"node": "Bitrix — Call", "type": "main", "index": 0}]]},
+        "Bitrix — Call": {
+            "main": [[{"node": "Read Bitrix Result", "type": "main", "index": 0}]]},
+        # Запись в таблицу — ПОСЛЕ Bitrix, чтобы строка знала, чем кончился
+        # вызов CRM. Иначе на вопрос «лид ушёл?» отвечать было бы нечем.
+        "Read Bitrix Result": {"main": [[{"node": "Save Lead", "type": "main", "index": 0}]]},
         "Save Lead": {"main": [[{"node": "Mark Lead", "type": "main", "index": 0}]]},
         "Mark Lead": {"main": [[{"node": "Reply — Lead Saved", "type": "main", "index": 0}]]},
         "Reply — Lead Saved": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},

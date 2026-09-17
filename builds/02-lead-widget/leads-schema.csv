@@ -2,12 +2,21 @@
 # не падает, а молча портит данные.
 #
 # String:  session_id, created_at, channel, name, phone, address_raw,
-#          address_clean, address_note, configuration, glazing, review_reason
+#          address_clean, address_note, configuration, glazing, review_reason,
+#          crm_lead_id, crm_status
 # Number:  price_low, price_high
 # Boolean: consent, needs_review
 #
 # phone — ТОЛЬКО String. Как Number он теряет «+», потерял бы ведущий ноль,
 # а дедупликация лида в Bitrix24 (B10) сравнивает строки. Поймано на живом
 # прогоне: «+79171234567» легло в таблицу как 79171234567.
-session_id,created_at,channel,name,phone,consent,address_raw,address_clean,address_note,price_low,price_high,configuration,glazing,needs_review,review_reason
-SAMPLE-DELETE-ME,2026-09-15T09:00:00.000Z,web,Пример Удалить,+70000000000,true,,,адрес не указан,0,0,,,false,Пример строки — удалить после импорта
+#
+# crm_lead_id — тоже String, и по той же причине: это идентификатор, а не
+# количество. Пустая строка означает «в CRM не ушло», и это не ноль.
+#
+# crm_lead_id / crm_status — строка аудита из B10: что мы отправили в чужую
+# CRM и что она ответила. Без них на вопрос «лид точно в Bitrix?» можно
+# ответить только «кажется». crm_status пишется словами, а не кодом, потому
+# что читать его будет менеджер, а не программа.
+session_id,created_at,channel,name,phone,consent,address_raw,address_clean,address_note,price_low,price_high,configuration,glazing,needs_review,review_reason,crm_lead_id,crm_status
+SAMPLE-DELETE-ME,2026-09-15T09:00:00.000Z,web,Пример Удалить,+70000000000,true,,,адрес не указан,0,0,,,false,Пример строки — удалить после импорта,,не отправлялось

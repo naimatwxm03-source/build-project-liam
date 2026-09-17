@@ -114,6 +114,12 @@ function buildLead(opts) {
       glazing: quoted ? quoted.glazing : '',
       needs_review: review.length > 0,
       review_reason: str(review.join('; '), MAX.reason),
+      // B10. Значения по умолчанию, а не пустота: их перезаписывает узел
+      // Read Bitrix Result. Если ветка Bitrix почему-то не отработала вовсе,
+      // строка честно скажет «не отправлялось» вместо пустой клетки, по
+      // которой не отличить «не отправляли» от «отправили и не записали».
+      crm_lead_id: '',
+      crm_status: 'не отправлялось',
     },
   };
 }
