@@ -30,6 +30,12 @@ Never skip `automation-cto` on a fuzzy idea. A brief on an undecided architectur
   - **Смотреть Qdrant теперь только через контейнер:** `docker exec n8n sh -c "wget -qO- http://qdrant:6333/collections"`. С Mac — через туннель: `ssh -N -L 6333:localhost:6333 root@<vps>`.
   - `curl localhost:6333` **с хоста больше не работает, и это признак успеха, а не поломки.**
   - **Docker обходит `ufw`** — правила пишутся в цепочку `DOCKER-USER`. Но правило в firewall — это заплатка; отсутствие порта — это решение.
+- **Приложение за Nginx слушает `127.0.0.1`, а не `0.0.0.0`. 2026-09-17.** Nginx работает на хосте и ходит в контейнер через loopback, поэтому публиковать порт на все интерфейсы не нужно — это просто второй вход в админку, уже без TLS и без логов Nginx.
+  - Панель n8n висела на `0.0.0.0:5678`: `https://n8n.n-enterprise.ru` — это Nginx, но `http://5.42.99.81:5678` открывал ту же панель напрямую. Сейчас `- "127.0.0.1:5678:5678"`, а в Nginx `proxy_pass http://127.0.0.1:5678;` — явно, без `localhost` (он резолвится и в IPv6).
+  - Точно так же закрыт сайт на `3000`: в Nginx **ничего** на него не проксировало — порт был открыт впустую. Проверка перед тем, как что-то закрывать: `grep -rn "<порт>" /etc/nginx/sites-enabled/`.
+  - Правило: **любой опубликованный порт должен отвечать на вопрос «кто снаружи сюда ходит?».** Нет ответа — порт закрывается, а не обкладывается firewall'ом.
+  - Ревизия одной командой: `ss -lntp | grep 0.0.0.0` — всё, что там осталось, должно быть только 22, 80 и 443.
+  - `com.docker.compose.project.config_files` у контейнера может быть **относительным путём** (`docker-compose.yml`). Сначала `cd` в `working_dir`, иначе патчится чужой файл в текущей директории — на этом один прогон и промахнулся.
 - **CRM:** Bitrix24. Client-owned credentials, always.
 - **Channels — VK is the RU default. Decision 02, 2026-09-13.**
   - **VK Callback API is the primary inbound path.** VK's servers are in Russia, so Russian-server → Russian-IP works where Telegram could not. **VK Long Poll** is the fallback and needs no inbound connectivity at all.
