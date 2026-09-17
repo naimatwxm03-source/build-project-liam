@@ -36,6 +36,12 @@ Never skip `automation-cto` on a fuzzy idea. A brief on an undecided architectur
   - Правило: **любой опубликованный порт должен отвечать на вопрос «кто снаружи сюда ходит?».** Нет ответа — порт закрывается, а не обкладывается firewall'ом.
   - Ревизия одной командой: `ss -lntp | grep 0.0.0.0` — всё, что там осталось, должно быть только 22, 80 и 443.
   - `com.docker.compose.project.config_files` у контейнера может быть **относительным путём** (`docker-compose.yml`). Сначала `cd` в `working_dir`, иначе патчится чужой файл в текущей директории — на этом один прогон и промахнулся.
+- **Логи контейнеров ограничены глобально. 2026-09-17.** В `/etc/docker/daemon.json` — `"log-opts": {"max-size": "10m", "max-file": "3"}`. Без этого лог контейнера растёт **без предела** и однажды забивает диск сервера целиком.
+  - Нашли на `nxai-assistant-bot`: **19301 перезапуск** — контейнер падал примерно раз в 70 секунд две недели подряд, и никто не замечал, потому что `docker ps` показывает бодрое `Up 44 seconds`.
+  - **`Up` — это не «работает».** Это «работает с момента последнего падения». Настоящий показатель — `docker inspect <name> --format '{{.RestartCount}}'`. Для контейнера, который не трогали, нормально `0–2`.
+  - Ревизия одной командой: `for c in $(docker ps -aq); do docker inspect $c --format '{{.Name}} {{.RestartCount}}'; done | sort -k2 -rn | head`.
+  - Вечно падающий контейнер снимается с автозапуска (`docker update --restart=no`), а не оставляется «пусть крутится» — он ест CPU и диск и прячет настоящие сбои в шуме.
+  - Причина падения `nxai-assistant-bot` — та же, что описана ниже про Telegram: `aiogram` на старте зовёт `get_me()` к `api.telegram.org`, который **с этого VPS недоступен**, ловит `TelegramNetworkError` и умирает. Лечится не перезапуском, а базовым URL на Worker: `AiohttpSession(api=TelegramAPIServer.from_base("https://edrus-telegram.naimatwxm03.workers.dev"))`. **Любой Telegram-клиент на этом сервере — n8n, Python, что угодно — обязан ходить через Worker.**
 - **CRM:** Bitrix24. Client-owned credentials, always.
 - **Channels — VK is the RU default. Decision 02, 2026-09-13.**
   - **VK Callback API is the primary inbound path.** VK's servers are in Russia, so Russian-server → Russian-IP works where Telegram could not. **VK Long Poll** is the fallback and needs no inbound connectivity at all.
