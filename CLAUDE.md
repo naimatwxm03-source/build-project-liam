@@ -24,6 +24,12 @@ Never skip `automation-cto` on a fuzzy idea. A brief on an undecided architectur
 - **n8n gotcha:** OpenAI node **v2** with a custom base URL can pass the credential test then 404 at runtime; **v1.8 and the AI Agent's OpenAI Chat Model node work.** Backup: `n8n-nodes-yc` community node.
 - **OCR/STT:** Yandex Vision OCR, Yandex SpeechKit. IAM tokens expire in 12h — refresh on a schedule.
 - **Storage:** Postgres (separate DB from n8n's own), Redis, Qdrant. Never n8n's Simple Vector Store — in-memory, dies on restart.
+- **Никакая база не публикует порт наружу. 2026-09-17.** Qdrant, Redis и Postgres живут в `docker-compose.yml` **без секции `ports:`** — n8n ходит к ним по имени внутри сети Docker (`qdrant:6333`, `redis:6379`), и публиковать порт на хост незачем.
+  - Qdrant стоял с `-p 6333:6333` на `0.0.0.0` **и без API-ключа**: любой, кто дотянулся до порта, мог читать, переписать и удалить векторы. Правило `iptables` в цепочке `DOCKER-USER` закрывало его, но правило **не переживает перезагрузку** — держалось только потому, что сервер не перезагружали две недели.
+  - Постоянное решение — убрать публикацию порта, а не защищать её. Тома объявлены `external: true`, поэтому пересоздание контейнера данные не трогает. Образ **пинится по версии** (`qdrant/qdrant:v1.17.1`): `latest` однажды обновит Qdrant поверх его же хранилища.
+  - **Смотреть Qdrant теперь только через контейнер:** `docker exec n8n sh -c "wget -qO- http://qdrant:6333/collections"`. С Mac — через туннель: `ssh -N -L 6333:localhost:6333 root@<vps>`.
+  - `curl localhost:6333` **с хоста больше не работает, и это признак успеха, а не поломки.**
+  - **Docker обходит `ufw`** — правила пишутся в цепочку `DOCKER-USER`. Но правило в firewall — это заплатка; отсутствие порта — это решение.
 - **CRM:** Bitrix24. Client-owned credentials, always.
 - **Channels — VK is the RU default. Decision 02, 2026-09-13.**
   - **VK Callback API is the primary inbound path.** VK's servers are in Russia, so Russian-server → Russian-IP works where Telegram could not. **VK Long Poll** is the fallback and needs no inbound connectivity at all.

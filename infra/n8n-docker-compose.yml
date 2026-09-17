@@ -1,0 +1,78 @@
+# Справочная копия /root/n8n/docker-compose.yml с VPS.
+#
+# ЗНАЧЕНИЙ ЗДЕСЬ НЕТ И БЫТЬ НЕ ДОЛЖНО. Все переменные окружения заменены на
+# ***: настоящие живут только на сервере. Это структура, а не конфигурация.
+#
+# Зачем копия в репозитории: файл на сервере существует в одном экземпляре,
+# и правки в нём никак не отслеживаются. Когда через полгода возникнет вопрос
+# «почему у Qdrant нет ports:», ответ должен быть здесь, а не в чьей-то памяти.
+#
+# Снято 2026-09-17, после закрытия публичного порта Qdrant.
+version: '3.8'
+services:
+  n8n:
+    image: n8nio/n8n:2.39.6
+    container_name: n8n
+    ports:
+      - "5678:5678"          # единственный порт наружу — за Nginx с TLS
+    environment:
+      - N8N_HOST=***
+      - N8N_PORT=***
+      - N8N_PROTOCOL=***
+      - NODE_ENV=***
+      - WEBHOOK_URL=***
+      - N8N_ENCRYPTION_KEY=***
+      - VK_ADMIN_PEER_ID=***
+      - VK_CONFIRMATION_STRING=***
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=***   # false, иначе $env не резолвится
+      - VK_CALLBACK_SECRET=***
+    volumes:
+      - n8n_n8n_storage:/home/node/.n8n
+    restart: always
+    networks:
+      - default
+      - qdrantnet
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    # НЕТ ports: — n8n ходит к Redis по имени внутри сети Docker.
+  qdrant:
+    image: qdrant/qdrant:v1.17.1
+    container_name: qdrant
+    restart: unless-stopped
+    volumes:
+      - n8n_qdrant_storage:/qdrant/storage
+    networks:
+      - qdrantnet
+    # НЕТ ports: — и в этом всё исправление.
+    #
+    # Раньше стоял `-p 6333:6333` на 0.0.0.0, причём у Qdrant НЕТ API-ключа:
+    # любой, кто дотянулся до порта, мог читать, переписать и удалить векторы.
+    # Правило iptables в DOCKER-USER это закрывало, но не переживало
+    # перезагрузку — держалось только потому, что сервер не перезагружали.
+    #
+    # Публикация порта не была нужна никогда: n8n ходит к qdrant:6333 внутри
+    # сети Docker. Убрать порт — это решение; правило в firewall — заплатка.
+    #
+    # Версия ПИНИТСЯ. С тегом latest однажды `docker-compose pull` обновит
+    # Qdrant поверх его же хранилища.
+volumes:
+  n8n_n8n_storage:
+    external: true
+  n8n_qdrant_storage:
+    external: true        # том создан до compose; external => compose его не тронет
+  redis_data:
+
+networks:
+  qdrantnet:
+    external: true
+    name: n8n_n8n_network
